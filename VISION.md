@@ -1,4 +1,4 @@
-# hypernova — the next era of DIP
+# hypernova — a vision: DIP's proven shape on the industry standard
 
 ## What DIP got right
 
@@ -8,7 +8,7 @@ share live values. A publication has a name; a name server knows where it
 lives; a subscriber asks by name and gets values with quality and timestamp.
 More than 55,000 publications run on that idea today. The shape is right.
 
-## Why a next era
+## Why a new generation
 
 DIP's substance — a homegrown protocol on a homegrown library, maintained by
 one community, opaque to every commercial and open-source tool — is where the
@@ -64,5 +64,5 @@ hypernova is DIP's shape rebuilt on that standard substance:
 - **v1 — hardening**: Part 14 message signing before any frame crosses a
   boundary; structured field types; registry redundancy.
 - **Later**: an MQTT flavor of the relay for consumers outside multicast
-  reach entirely (cloud, offices); WinCC OA as a native consumer the day ETM
+  reach entirely (cloud, offices); commercial SCADA tools as native consumers the day their vendors
   ships Part 14; DIP-to-hypernova bridging for staged migration.

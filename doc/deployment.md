@@ -33,15 +33,15 @@ field servers ──multicast──► local            consumers, by name
    subscriber sits:
 
    ```bash
-   hypernova register atlas/dcs/atca/crate1/env \
+   hypernova register site/area1/pump7/env \
        --address opc.udp://239.10.0.1:14840 \
-       --endpoint gpn=opc.udp://10.147.0.5:24840 \
+       --endpoint officenet=opc.udp://10.147.0.5:24840 \
        --publisher-id 42 --writer-group-id 100 --dataset-writer-id 1 \
        --field temperature=DOUBLE --field fanSpeed=INT32
    ```
 
    Consumers on the technical network subscribe to the multicast group;
-   consumers elsewhere run `hypernova sub ... --network gpn` and get the
+   consumers elsewhere run `hypernova sub ... --network officenet` and get the
    relayed unicast endpoint.
 
 ## Relay configuration
@@ -50,7 +50,7 @@ field servers ──multicast──► local            consumers, by name
 {
   "routes": [
     {
-      "name": "atlas/dcs/atca/crate1/env",
+      "name": "site/area1/pump7/env",
       "from": "opc.udp://239.10.0.1:14840",
       "to": ["opc.udp://10.147.0.5:24840", "opc.udp://10.147.0.6:24840"],
       "ttl": 1

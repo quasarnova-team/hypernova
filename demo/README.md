@@ -10,15 +10,15 @@ What starts (see `compose.yaml` for the picture):
 
 - **field-server** — a real supernova C++ OPC UA server (UASDK backend),
   publishing `counter`/`temperature`/`label` at 10 Hz as UADP multicast on
-  the `atcn` network. Config.xml only, no Pub/Sub code.
+  the `fieldnet` network. Config.xml only, no Pub/Sub code.
 - **registry** — feet in both networks. It was told the publication's name
   once, listens to the multicast itself, and serves the browser at
   <http://localhost:4850> — live values, quality, rate, staleness.
-- **relay** — the pinhole: joins the multicast on `atcn`, re-emits the
-  datagrams unchanged to one unicast target on `gpn`. Counters at
+- **relay** — the pinhole: joins the multicast on `fieldnet`, re-emits the
+  datagrams unchanged to one unicast target on `officenet`. Counters at
   <http://localhost:4860/api/health>.
-- **consumer** — on `gpn` only; it can't see the multicast, doesn't know the
-  server, and still runs `hypernova sub site/area1/demo/env --network gpn`:
+- **consumer** — on `officenet` only; it can't see the multicast, doesn't know the
+  server, and still runs `hypernova sub site/area1/demo/env --network officenet`:
   the registry hands it the relayed endpoint and named values arrive.
 
 The script registers the publication, waits, then **verifies every leg**

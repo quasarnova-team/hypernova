@@ -83,7 +83,7 @@ Registration body:
   "publisherId": 42, "publisherIdType": "UINT16",
   "writerGroupId": 100, "dataSetWriterId": 1,
   "fields": [{"name": "temperature", "type": "DOUBLE"}],
-  "endpoints": {"gpn": "opc.udp://10.147.0.5:24840"},
+  "endpoints": {"officenet": "opc.udp://10.147.0.5:24840"},
   "description": "optional", "leaseSeconds": 600, "replace": false
 }
 ```

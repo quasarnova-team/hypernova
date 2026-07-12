@@ -55,7 +55,7 @@ of named, typed **fields**. Publication names are hierarchical,
 slash-separated, DIP-style:
 
 ```
-atlas/dcs/atca/crate1/env        fields: temperature (Double), fanSpeed (Int32)
+site/area1/pump7/env        fields: temperature (Double), fanSpeed (Int32)
 ```
 
 The registry enforces uniqueness of names and of stream tuples per
@@ -80,7 +80,7 @@ values, message rate, staleness, and a copy-paste subscriber snippet (and
 supernova `DataSetReader` XML) for every publication.
 
 **Cross a boundary.** A relay instance on an allowed host joins
-`atlas/dcs/atca/crate1/env` on network A and re-emits it to declared unicast
+`site/area1/pump7/env` on network A and re-emits it to declared unicast
 targets (or a group) on network B. The pinhole is the relay's config — one
 auditable file. Subscribers on B use the same client library with the B-side
 coordinates (the registry stores per-network reachability, so lookup answers

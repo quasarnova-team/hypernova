@@ -1,25 +1,27 @@
 # The DIP-replacement topology, miniaturized:
 #
-#   atcn (technical network)          gpn (general network)
+#   fieldnet (technical network)          officenet (general network)
 #   ┌──────────────────────┐          ┌─────────────────────┐
 #   │ field-server (C++)   │          │ consumer            │
 #   │  supernova, UASDK    │          │  hypernova sub      │
 #   │  multicast 239.0.0.5 │          │  by name, unicast   │
 #   └──────────┬───────────┘          └──────────▲──────────┘
 #              │            relay (pinhole)      │
-#              └───────────► joins atcn ─────────┘
-#                            re-emits to gpn
-#   registry+browser: feet in both networks, listens on atcn,
+#              └───────────► joins fieldnet ─────────┘
+#                            re-emits to officenet
+#   registry+browser: feet in both networks, listens on fieldnet,
 #   serves lookups per network, web UI on http://localhost:4850
 #
 # Start with demo/run_demo.sh (it builds the image, registers the
 # publication and verifies data end to end).
 
+# note: docker orders container interfaces lexicographically by network name;
+# the field side must sort first (fieldnet < officenet) so multicast rides eth0.
 networks:
-  atcn:
+  fieldnet:
     ipam:
       config: [{subnet: "172.28.0.0/24"}]
-  gpn:
+  officenet:
     ipam:
       config: [{subnet: "172.29.0.0/24"}]
 
@@ -31,7 +33,7 @@ services:
       - ${SUPERNOVA_TREE:?point SUPERNOVA_TREE at a built supernova publisher tree}:/cell/supernova
     working_dir: /cell/supernova/build/bin
     command: ./OpcUaServer
-    networks: [atcn]
+    networks: [fieldnet]
 
   registry:
     image: hypernova:demo
@@ -39,7 +41,7 @@ services:
       context: ..
       dockerfile: demo/Dockerfile
     command: ["registry", "--store", ""]
-    networks: [atcn, gpn]
+    networks: [fieldnet, officenet]
     ports:
       - "4850:4850"
 
@@ -49,8 +51,8 @@ services:
     volumes:
       - ./relay.json:/config/relay.json:ro
     networks:
-      atcn: {}
-      gpn: {}
+      fieldnet: {}
+      officenet: {}
     ports:
       - "4860:4860"
 
@@ -58,9 +60,9 @@ services:
     image: hypernova:demo
     command: ["sub", "site/area1/demo/env",
               "--registry", "http://registry:4850",
-              "--network", "gpn", "--timeout", "3600"]
+              "--network", "officenet", "--timeout", "3600"]
     restart: on-failure
     networks:
-      gpn:
+      officenet:
         ipv4_address: 172.29.0.20
     depends_on: [registry]

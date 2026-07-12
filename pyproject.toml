@@ -1,6 +1,6 @@
 [project]
 name = "hypernova"
-version = "0.1.0"
+version = "1.0.0"
 description = "The next era of DIP — publish/subscribe data interchange for control systems on OPC UA Pub/Sub (Part 14): registry, live browser, Python clients, boundary relay."
 readme = "README.md"
 requires-python = ">=3.10"

@@ -20,11 +20,11 @@ The production release — every v0.1 gap closed:
   arrays, quality, signature verification — byte-parity with the C++ and
   Python codecs on shared golden vectors, plus a live cross-language CI loop.
 - **`bridge-opcua`**: publications served as a classic OPC UA server —
-  WinCC OA consumes hypernova streams today (verified with an OPC UA
+  any OPC UA client, including commercial SCADA tools, can consume streams (verified with an OPC UA
   client end to end).
 - **`bridge-dip`**: the migration bridge — republish existing DIP
   publications as hypernova streams (CI-tested against a stubbed DIP API;
-  on-site DIPNS validation pending CERN network access).
+  on-site validation against a live DIP installation still pending).
 - **Soaked and reviewed**: 40-minute multi-wrap soak with the registry
   subprocess measured (flat RSS/fds, zero loss); second independent
   adversarial review — 18 findings, all fixed and regression-locked.

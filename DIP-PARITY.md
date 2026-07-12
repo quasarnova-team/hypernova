@@ -5,7 +5,7 @@ the capability exists with strictly more than DIP provides.
 
 | DIP capability | hypernova | Status |
 |---|---|---|
-| Named publications, hierarchical namespace | Registry names (`atlas/dcs/...`), collision refusal | ✅ |
+| Named publications, hierarchical namespace | Registry names (`site/area1/...`), collision refusal | ✅ |
 | Primitive value types | Boolean, (S)Byte, (U)Int16/32/64, Float, Double, String, DateTime | ✅ |
 | Arrays of primitives | Part 14 Variant arrays (`"DOUBLE[]"` field declarations) | ✅ |
 | Structured publications | A publication *is* a named, typed multi-field dataset — DIP's struct, standardized | ✅ |
@@ -20,8 +20,8 @@ the capability exists with strictly more than DIP provides.
 | Cross-domain reachability (TN↔GPN) | Relay pinholes (explicit, auditable, per-stream) or plain unicast UADP through a firewall rule — DIP's own model | ✅ |
 | Publication liveness | Leases + continuous listening: the browser shows stale/lost/rate, which DIPNS never knew | ✅ better |
 | Name-server redundancy | DIP-style primary/secondary: `HYPERNOVA_REGISTRY` takes comma-separated registries — lookups fail over in order, publishers register with every one; plus data flows with no registry at all and subscribers cache coordinates | ✅ |
-| Migration from DIP | `hypernova bridge-dip`: republishes existing DIP publications as hypernova streams (pipeline CI-tested against a stubbed DIP API; on-site validation against a real DIPNS pending CERN network access) | ✅ (site validation pending) |
-| WinCC OA consumption | `hypernova bridge-opcua`: publications served as a classic OPC UA server — consumed by WinCC OA today, verified with an OPC UA client end-to-end | ✅ |
+| Migration from DIP | `hypernova bridge-dip`: republishes existing DIP publications as hypernova streams (pipeline CI-tested against a stubbed DIP API; on-site validation against a live DIP installation still pending) | ✅ (site validation pending) |
+| SCADA consumption | `hypernova bridge-opcua`: publications served as a classic OPC UA server — any OPC UA client, including commercial SCADA tools, can consume streams; verified with an OPC UA client end-to-end | ✅ |
 | Smoothing | Not offered — DIP doesn't offer it either | ➖ parity |
 | Message authentication | HMAC-SHA256 signatures in the Part 14 SecurityHeader — publisher-side, boundary-relay-side, verified in Python and Java. **Beyond DIP** (which has none) | ✅ better |
 | Access control / archiving | Not offered — DIP doesn't offer them either | ➖ parity |

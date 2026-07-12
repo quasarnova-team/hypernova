@@ -19,7 +19,7 @@ signed**. Three places can sign or verify:
 ```bash
 python -c "import secrets; print(secrets.token_hex(32))" > stream.key
 # boundary relay route:  "sign_key_file": "/etc/hypernova/stream.key"
-hypernova sub atlas/dcs/atca/crate1/env --network gpn --verify-key-file stream.key
+hypernova sub site/area1/pump7/env --network officenet --verify-key-file stream.key
 ```
 
 ## The wire format (hypernova signing profile v1)

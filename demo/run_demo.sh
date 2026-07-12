@@ -3,9 +3,9 @@
 #   demo/run_demo.sh          bring up, verify end to end, leave running
 #   demo/run_demo.sh down     tear down
 #
-# A supernova C++ server multicasts on the "atcn" network; the registry
+# A supernova C++ server multicasts on the "fieldnet" network; the registry
 # (feet in both networks) names and watches the stream; a relay pinholes it
-# to the "gpn" network where a consumer subscribes by name. The browser is
+# to the "officenet" network where a consumer subscribes by name. The browser is
 # yours at http://localhost:4850 while it runs.
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -33,10 +33,10 @@ done
 curl -sf -X PUT http://localhost:4850/api/publications/site/area1/demo/env \
   -H 'Content-Type: application/json' -d '{
     "address": "opc.udp://239.0.0.5:4840",
-    "endpoints": {"gpn": "opc.udp://172.29.0.20:24840"},
+    "endpoints": {"officenet": "opc.udp://172.29.0.20:24840"},
     "publisherId": 42, "publisherIdType": "UINT16",
     "writerGroupId": 100, "dataSetWriterId": 1,
-    "description": "demo: supernova field server, relayed to gpn",
+    "description": "demo: supernova field server, relayed to officenet",
     "fields": [{"name": "counter", "type": "INT32"},
                {"name": "temperature", "type": "DOUBLE"},
                {"name": "label", "type": "STRING"}],
@@ -54,6 +54,6 @@ cat <<EOF
 DEMO UP — explore it:
   browser (live values, copy-paste snippets):  http://localhost:4850
   relay counters (the pinhole, auditable):     http://localhost:4860/api/health
-  consumer on 'gpn' printing by name:          docker compose -f demo/compose.yaml logs -f consumer
+  consumer on 'officenet' printing by name:          docker compose -f demo/compose.yaml logs -f consumer
 Tear down with: demo/run_demo.sh down
 EOF

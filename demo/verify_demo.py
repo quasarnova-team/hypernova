@@ -23,14 +23,14 @@ def main():
     detail = get("http://localhost:4850/api/publications/site/area1/demo/env")
     live = detail["live"]
     if live["stale"]:
-        failures.append("registry: stream is stale on atcn")
+        failures.append("registry: stream is stale on fieldnet")
     elif live["rateHz"] < 5:
         failures.append(f"registry: unexpected rate {live['rateHz']} Hz")
     values = {v["name"]: v for v in detail.get("values", [])}
     if "counter" not in values:
         failures.append("registry: no live counter value")
     else:
-        print(f"registry (atcn):  {live['messages']} msgs @ {live['rateHz']} Hz, "
+        print(f"registry (fieldnet):  {live['messages']} msgs @ {live['rateHz']} Hz, "
               f"counter={values['counter']['value']}, label={values['label']['value']!r}")
 
     relay = get("http://localhost:4860/api/health")
@@ -45,11 +45,11 @@ def main():
         capture_output=True, text=True).stdout
     counters = [int(m.group(1)) for m in re.finditer(r"counter=(\d+)", logs)]
     if len(counters) < 10:
-        failures.append(f"consumer: only {len(counters)} updates on gpn")
+        failures.append(f"consumer: only {len(counters)} updates on officenet")
     elif counters[-1] <= counters[0]:
-        failures.append("consumer: counter not advancing on gpn")
+        failures.append("consumer: counter not advancing on officenet")
     else:
-        print(f"consumer (gpn):   {len(counters)} updates by name, "
+        print(f"consumer (officenet):   {len(counters)} updates by name, "
               f"counter {counters[0]} -> {counters[-1]}")
 
     if failures:
