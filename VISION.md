@@ -58,11 +58,13 @@ hypernova is DIP's shape rebuilt on that standard substance:
 
 ## Where this goes
 
-- **v0.x — the fabric**: registry + live browser, publish/subscribe by name
-  in Python, supernova servers as native publishers, boundary relay,
+- **v0.x — the fabric** — shipped: registry + live browser, publish/subscribe
+  by name in Python, supernova servers as native publishers, boundary relay,
   DIP-parity demonstrated end to end.
-- **v1 — hardening**: Part 14 message signing before any frame crosses a
-  boundary; structured field types; registry redundancy.
+- **v1 — hardening** — shipped in 1.0.0 (see CHANGELOG.md): Part 14 message
+  signing at publisher or boundary; registry redundancy (mirror + failover);
+  a Java client; the DIP migration bridge.
 - **Later**: an MQTT flavor of the relay for consumers outside multicast
-  reach entirely (cloud, offices); commercial SCADA tools as native consumers the day their vendors
-  ships Part 14; DIP-to-hypernova bridging for staged migration.
+  reach entirely (cloud, offices); full Part 14 SecurityPolicy/SKS interop;
+  commercial SCADA tools as native consumers the day their vendors ship
+  Part 14.

@@ -3,8 +3,8 @@
 Scored per aspect, with the evidence that justifies the score. A score of 10
 means: nothing known is missing *for what this version claims to be*; known
 non-goals are stated in the document they belong to, not hidden. This is the
-production release — every gap the v0.1 evaluation left open is closed, and a
-second independent adversarial review has been absorbed.
+consolidation release — every gap the v0.1 evaluation left open is closed, and
+a second internal adversarial review has been absorbed.
 
 | Aspect | Score | Evidence |
 |---|---|---|
@@ -17,7 +17,7 @@ second independent adversarial review has been absorbed.
 | **Demo** | 10/10 | One command, self-verifying at every leg, real C++ field server, two real networks, relay pinhole, leaves an explorable browser. |
 | **UX** | 10/10 | The registry browser is a genuine DIP-browser successor, visually verified live: a **namespace tree** with per-branch live/stale rollup and counts, an instrument stream pane with live values, quality dots, stat tiles, and **per-field sparklines**; deep-linkable, dark/light, zero JS dependencies, XSS-clean. CLI errors one line and prescriptive; `sub` waits for late publishers; `--interface` for dual-homed hosts; failure drill documented. |
 | **Documentation** | 10/10 | README (product page with the live browser), quickstart, API reference (matches code — reviewers checked contract claims), deployment (+systemd units), security, VISION, ARCHITECTURE, DIP-PARITY, per-client READMEs, CHANGELOG. No version numbers duplicated into prose. |
-| **Review** | 10/10 | Two independent adversarial passes with executed proof-of-concept per finding: round 1 (10 findings, 3 restart-surviving DoS) and round 2 on the v1 surface (18 findings incl. a require_signed enforcement gap and relay signing semantics). All 28 fixed, each with a regression test; clean bills recorded, not assumed. |
+| **Review** | 10/10 | Two internal adversarial passes with executed proof-of-concept per finding: round 1 (10 findings, 3 restart-surviving DoS) and round 2 on the v1 surface (18 findings incl. a require_signed enforcement gap and relay signing semantics). All 28 fixed, each with a regression test; clean bills recorded, not assumed. |
 | **DIP parity** | 10/10 | Every DIP capability present, most strictly better — see DIP-PARITY.md. Closed since v0.1: native Java client (was the one 🟡), name-server redundancy (mirror + failover), a DIP→hypernova migration bridge, and SCADA consumption via the OPC UA bridge (any OPC UA client). |
 
 ## Known non-goals of v1.0 (stated, deliberate)
@@ -30,4 +30,4 @@ second independent adversarial review has been absorbed.
 - **No MQTT transport flavor yet** (VISION roadmap) — for consumers beyond
   multicast reach, the OPC UA bridge or a relay pinhole serves today.
 - **DIP bridge validated against a stubbed DIP API, not a live DIPNS** —
-  on-site validation needs the CERN network; stated in DIP-PARITY.md.
+  on-site validation against a live DIP installation still pending; stated in DIP-PARITY.md.

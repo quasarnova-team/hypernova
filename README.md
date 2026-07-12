@@ -25,7 +25,7 @@ OPC UA server is already a native publisher with five lines of config.
 <p align="center"><img src="doc/images/browser.png" width="880" alt="The hypernova registry browser: a live namespace tree and an instrument-style stream pane"></p>
 <p align="center"><em>The registry browser — DIP's browser, remade: a live namespace tree (with per-branch rollup state)
 and an instrument pane for the selected stream — values, quality, rate, and a per-field sparkline,
-fed by a real supernova C++ server at 10 Hz (synthetic demo namespaces). Deep-linkable, dark/light, zero dependencies.</em></p>
+fed by a real supernova C++ server at ~10 Hz (synthetic demo namespaces). Deep-linkable, dark/light, zero dependencies.</em></p>
 
 ## Five lines, either direction
 
@@ -64,7 +64,7 @@ element in its config.xml
 
 ## The pieces
 
-| | |
+| Component | What it does |
 |---|---|
 | `hypernova registry` | The phonebook that listens: lookups, collision refusal, leases, per-network endpoints, primary/secondary failover, Prometheus `/metrics` — and the **live namespace browser** above (tree navigation, per-field sparklines, quality, copy-paste subscribers). Advisory by design: data flows without it. |
 | `hypernova` / Java client | Publish & subscribe by name; per-field OPC UA status + source timestamp; scalars and arrays; coordinate caching (registry-down resilient). |
@@ -108,7 +108,8 @@ pip install "hypernova[bridge] @ git+https://github.com/quasarnova-team/hypernov
 # (PyPI's "hypernova" is an unrelated package — install from git)
 ```
 
-Ten-minute tour: [doc/quickstart.md](doc/quickstart.md) · API:
+Docs site: [quasarnova-team.github.io/hypernova](https://quasarnova-team.github.io/hypernova/) ·
+ten-minute tour: [doc/quickstart.md](doc/quickstart.md) · API:
 [doc/api.md](doc/api.md) · deploying across real network boundaries (+
 systemd units in [deploy/](deploy/)): [doc/deployment.md](doc/deployment.md)
 

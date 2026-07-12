@@ -9,6 +9,10 @@ Publications are Part 14 datasets over UDP, readable by any Part 14
 implementation — and every [supernova](https://github.com/quasarnova-team/supernova)
 OPC UA server is already a native publisher with a `<PubSub>` element in its config.
 
+<p align="center"><img src="images/browser.png" alt="The hypernova registry browser: live namespace tree and instrument-style stream pane" style="max-width:100%"></p>
+<p align="center"><em>The registry browser: values, quality, rate and per-field sparklines,
+fed by a real supernova C++ server at ~10 Hz (synthetic demo namespaces).</em></p>
+
 ## Install
 
 ```bash
@@ -28,7 +32,7 @@ with Subscriber("site/area1/pump7/env") as sub:
 ```
 
 A dependency-free Java client ships too —
-[clients/java](https://github.com/quasarnova-team/hypernova/tree/main/clients/java).
+[clients/java](https://github.com/quasarnova-team/hypernova/tree/master/clients/java).
 
 ## Where to next
 

@@ -17,7 +17,7 @@ the capability exists with strictly more than DIP provides.
 | Subscriber API (C++) | supernova `DataSetReader` (config.xml, values land in the address space); open62541 for standalone apps | ✅ |
 | Publisher/Subscriber API (Python) | `hypernova.Publisher` / `hypernova.Subscriber` — five lines, DIP-flat | ✅ new |
 | Java API | Native, dependency-free client ([clients/java](clients/java)): subscribe/publish by name, arrays, quality, signature verify — byte-parity with the C++/Python codecs proven on shared golden vectors | ✅ |
-| Cross-domain reachability (TN↔GPN) | Relay pinholes (explicit, auditable, per-stream) or plain unicast UADP through a firewall rule — DIP's own model | ✅ |
+| Cross-domain reachability (technical ↔ office network) | Relay pinholes (explicit, auditable, per-stream) or plain unicast UADP through a firewall rule — DIP's own model | ✅ |
 | Publication liveness | Leases + continuous listening: the browser shows stale/lost/rate, which DIPNS never knew | ✅ better |
 | Name-server redundancy | DIP-style primary/secondary: `HYPERNOVA_REGISTRY` takes comma-separated registries — lookups fail over in order, publishers register with every one; plus data flows with no registry at all and subscribers cache coordinates | ✅ |
 | Migration from DIP | `hypernova bridge-dip`: republishes existing DIP publications as hypernova streams (pipeline CI-tested against a stubbed DIP API; on-site validation against a live DIP installation still pending) | ✅ (site validation pending) |

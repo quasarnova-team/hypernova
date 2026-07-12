@@ -1,10 +1,10 @@
 # Deployment across real network boundaries
 
-The reference topology (mirroring how DIP is actually deployed at CERN —
-one well-known central service, per-flow firewall exceptions):
+The reference topology — the shape DIP proved: one well-known central
+service, per-flow firewall exceptions:
 
 ```
-technical network (e.g. ATCN)              other networks (GPN, ...)
+technical network (fieldnet)               office networks (officenet, ...)
 ──────────────────────────────             ─────────────────────────
 field servers ──multicast──► local            consumers, by name
      │        (fan-out costs nothing)               ▲
@@ -74,10 +74,13 @@ refusal enforces uniqueness of both names and stream tuples.
 
 ## Security posture
 
-Frames are not yet signed (Part 14 SecurityHeader is the v1 hardening item).
-Keep multicast inside trusted networks; every inter-network flow is an
-explicit relay route on a controlled host. This is the same exposure DIP has
-today (no access control), minus long-lived sessions, plus an audit trail.
+Frames can carry an HMAC-SHA256 signature in the Part 14 SecurityHeader —
+sign at the publisher, or at the boundary relay the moment a stream leaves
+the trusted network; subscribers with a key reject unsigned frames outright
+(`require_signed`). Multicast inside a trusted network stays unsigned by
+default; every inter-network flow is an explicit relay route on a controlled
+host. Limits (no replay window, no encryption yet) are stated honestly in
+[security.md](security.md).
 
 ## Failure drill
 

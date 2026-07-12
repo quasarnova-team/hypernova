@@ -96,14 +96,16 @@ differ by where you ask from).
 | relay dies | B-side streams go stale; browser staleness makes it visible; relay is stateless — restart is recovery |
 | datagram loss | gap visible in sequence numbers; per-publication loss counters in subscriber stats |
 
-## Security posture (v0.x, stated plainly)
+## Security posture (stated plainly)
 
-UADP frames are neither signed nor encrypted yet. Deployment guidance:
-multicast stays inside trusted technical networks; relays — not raw
-multicast — cross boundaries, so every inter-network flow is an explicit,
-per-stream decision on a controlled host. Part 14 SecurityHeader (signing)
-is the v1 hardening item; until then hypernova's exposure equals DIP's
-(which has no access control either), minus DIP's server-side sessions.
+Frames can carry an HMAC-SHA256 signature in the Part 14 SecurityHeader —
+signed at the publisher, or at the boundary relay the moment a stream leaves
+the trusted network; a subscriber with a key rejects unsigned frames
+outright. Encryption and a replay window do not exist yet; the honest limits
+live in doc/security.md. Deployment guidance stands: multicast stays inside
+trusted technical networks; relays — not raw multicast — cross boundaries,
+so every inter-network flow is an explicit, per-stream decision on a
+controlled host.
 
 ## Dependencies
 

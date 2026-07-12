@@ -2,7 +2,7 @@
 
 ## 1.0.0 (2026-07-12)
 
-The production release — every v0.1 gap closed:
+The consolidation release — every v0.1 gap closed:
 
 - **Message signing** (hypernova signing profile v1): HMAC-SHA256 in the
   Part 14 SecurityHeader frame structure — sign at the publisher or at the
@@ -26,9 +26,9 @@ The production release — every v0.1 gap closed:
   publications as hypernova streams (CI-tested against a stubbed DIP API;
   on-site validation against a live DIP installation still pending).
 - **Soaked and reviewed**: 40-minute multi-wrap soak with the registry
-  subprocess measured (flat RSS/fds, zero loss); second independent
+  subprocess measured (flat RSS/fds, zero loss); second internal
   adversarial review — 18 findings, all fixed and regression-locked.
-- **Ops**: container image on ghcr, systemd units, deep-linkable browser,
+- **Ops**: container build + release workflow (public ghcr publication pending), systemd units, deep-linkable browser,
   registry failover via comma-separated URLs.
 
 

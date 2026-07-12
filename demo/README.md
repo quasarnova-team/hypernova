@@ -1,4 +1,4 @@
-# The demo: DIP's replacement, live on your machine
+# The demo: the full DIP-parity topology, live on your machine
 
 One command brings up the whole story:
 
@@ -8,7 +8,7 @@ demo/run_demo.sh
 
 What starts (see `compose.yaml` for the picture):
 
-- **field-server** — a real supernova C++ OPC UA server (UASDK backend),
+- **field-server** — a real supernova C++ OPC UA server (commercial-stack backend),
   publishing `counter`/`temperature`/`label` at 10 Hz as UADP multicast on
   the `fieldnet` network. Config.xml only, no Pub/Sub code.
 - **registry** — feet in both networks. It was told the publication's name
@@ -25,6 +25,5 @@ The script registers the publication, waits, then **verifies every leg**
 (registry live path, relay counters, consumer updates) and leaves the
 topology running for exploration. Tear down with `demo/run_demo.sh down`.
 
-Requirement: a built supernova publisher tree (`SUPERNOVA_TREE`, defaulting
-to the supernova bench cell `e2e-pub-uasdk` — see `interop/run_interop.sh`
-header for how these trees come to exist).
+Requirement: a built supernova publisher tree (`SUPERNOVA_TREE` — see
+`interop/run_interop.sh` header for how these trees come to exist).

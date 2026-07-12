@@ -1,12 +1,12 @@
 [project]
 name = "hypernova"
 version = "1.0.0"
-description = "The next era of DIP — publish/subscribe data interchange for control systems on OPC UA Pub/Sub (Part 14): registry, live browser, Python clients, boundary relay."
+description = "DIP's proven shape — named publications, a registry, subscribe by name — rebuilt on OPC UA Pub/Sub (Part 14). Python & Java clients, boundary relays."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "BSD-2-Clause"
 authors = [{ name = "The quasarnova team" }]
-keywords = ["opcua", "opc-ua", "pubsub", "dip", "scada", "cern", "uadp", "quasar"]
+keywords = ["opcua", "opc-ua", "pubsub", "dip", "scada", "uadp", "quasar"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",

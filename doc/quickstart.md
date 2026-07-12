@@ -6,7 +6,8 @@ one machine.
 ## 1. Install
 
 ```bash
-pip install hypernova          # Python >= 3.10
+pip install "hypernova[bridge] @ git+https://github.com/quasarnova-team/hypernova"
+# Python >= 3.10. (PyPI's "hypernova" is an unrelated package — install from git.)
 ```
 
 ## 2. Start the phonebook
