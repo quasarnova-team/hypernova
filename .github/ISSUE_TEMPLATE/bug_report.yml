@@ -1,0 +1,30 @@
+name: Bug report
+description: Something behaves differently than documented
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: >
+        Commands + publication config (name, fields, address). If wire-level, a hex
+        dump of the frame is gold.
+      render: shell
+  - type: input
+    id: version
+    attributes:
+      label: hypernova version + language (Python/Java)
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: OS / network setup
+      placeholder: e.g. Ubuntu 24.04, multicast across two docker networks

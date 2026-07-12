@@ -1,0 +1,24 @@
+name: Feature request
+description: Something hypernova should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: job
+    attributes:
+      label: What are you trying to do?
+      description: The interchange job, not the solution — migrating publications, bridging, relaying...
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What should hypernova do?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [registry, clients (Python/Java), relay, bridge-dip, bridge-opcua, signing, browser UI, other]
+    validations:
+      required: true
