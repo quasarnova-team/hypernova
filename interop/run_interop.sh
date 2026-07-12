@@ -40,14 +40,14 @@ docker exec hn-py pip install -q -e . >/dev/null 2>&1
 docker exec -d hn-py hypernova registry --store ''
 sleep 2
 
-docker exec hn-py hypernova register atlas/dcs/interop/env \
+docker exec hn-py hypernova register site/area1/interop/env \
   --address opc.udp://239.0.0.5:4840 --publisher-id 42 \
   --writer-group-id 100 --dataset-writer-id 1 \
   --field counter=INT32 --field temperature=DOUBLE --field label=STRING \
   --registry http://localhost:4850 \
   --description "supernova e2e publisher, interop test" || exit 1
 
-docker exec hn-py hypernova sub atlas/dcs/interop/env \
+docker exec hn-py hypernova sub site/area1/interop/env \
   --registry http://localhost:4850 --count 12 --timeout 20 > "$HERE/dir1_sub.log" || {
     echo "DIRECTION 1 FAIL: no data"; cat "$HERE/dir1_sub.log"; exit 1; }
 
@@ -55,7 +55,7 @@ sleep 1
 docker exec hn-py python3 - <<'EOF' > "$HERE/dir1_registry.log" || exit 1
 import json, urllib.request
 detail = json.loads(urllib.request.urlopen(
-    "http://localhost:4850/api/publications/atlas/dcs/interop/env", timeout=5).read())
+    "http://localhost:4850/api/publications/site/area1/interop/env", timeout=5).read())
 live = detail["live"]
 values = {v["name"]: v for v in detail["values"]}
 assert not live["stale"], "registry browser sees the stream as stale"
