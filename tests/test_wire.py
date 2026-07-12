@@ -115,3 +115,41 @@ def test_keepalive_and_foreign_headers_tolerated():
     decoded = decode_network_message(wire)
     assert decoded.messages[0].keep_alive
     assert decoded.messages[0].fields == []
+
+
+def test_array_round_trip_all_encodings():
+    fields = [
+        FieldValue(BuiltinType.INT32, [1, -2, 3]),
+        FieldValue(BuiltinType.DOUBLE, [0.5, -1.25]),
+        FieldValue(BuiltinType.STRING, ["alpha", "", "γάμμα"]),
+        FieldValue(BuiltinType.BOOLEAN, [True, False, True]),
+        FieldValue(BuiltinType.UINT64, []),
+    ]
+    for datavalue in (False, True):
+        wire = encode_network_message(make_message(list(fields)), datavalue_fields=datavalue)
+        decoded = decode_network_message(wire).messages[0].fields
+        assert [(f.type, f.value) for f in decoded] == [(f.type, list(f.value)) for f in fields]
+
+
+def test_array_wire_format_is_spec_exact():
+    wire = encode_network_message(
+        make_message([FieldValue(BuiltinType.INT32, [7, 8])],
+                     pid=9, pid_type=PublisherIdType.BYTE, wg=1, seq=1),
+        datavalue_fields=False)
+    body = wire[-(1 + 4 + 8):]
+    assert body[0] == 0x86            # Int32 (6) | array-of-values (0x80)
+    assert body[1:5] == b"\x02\x00\x00\x00"
+    assert body[5:9] == b"\x07\x00\x00\x00"
+    assert body[9:13] == b"\x08\x00\x00\x00"
+
+
+def test_array_truncation_and_bounds():
+    wire = encode_network_message(
+        make_message([FieldValue(BuiltinType.INT32, list(range(10)))]))
+    for cut in range(len(wire)):
+        with pytest.raises(WireError):
+            decode_network_message(wire[:cut])
+    absurd = bytearray(encode_network_message(
+        make_message([FieldValue(BuiltinType.INT32, [1])], pid_type=PublisherIdType.BYTE)))
+    with pytest.raises(WireError):
+        decode_network_message(bytes(absurd)[:14] + b"\xff\xff\xff\x7f" + bytes(absurd)[18:])

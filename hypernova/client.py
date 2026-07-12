@@ -110,10 +110,12 @@ class Subscriber:
         writer_group_id: int | None = None,
         dataset_writer_id: int | None = None,
         field_names: list[str] | None = None,
+        interface: str | None = None,
     ) -> None:
         self.name = name
         self._registry = registry or default_registry_url()
         self._network = network
+        self._interface = interface or os.environ.get("HYPERNOVA_INTERFACE") or "0.0.0.0"
         if address is not None:
             self._coords = {
                 "address": address, "publisherId": publisher_id,
@@ -148,7 +150,14 @@ class Subscriber:
 
     def start(self) -> "Subscriber":
         host, port = transport.parse_address(self._coords["address"])
-        self._socket = transport.open_receive_socket(host, port)
+        try:
+            self._socket = transport.open_receive_socket(host, port, interface=self._interface)
+        except OSError as error:
+            raise OSError(
+                f"cannot listen on {host}:{port} for {self.name!r}: {error}. "
+                "Unicast ports are exclusive per host — if another process "
+                "(e.g. a registry with listening enabled) already binds this "
+                "port, only one of them can receive the stream.") from None
         self._socket.settimeout(0.25)
         self._thread = threading.Thread(target=self._run, name=f"hypernova-sub-{self.name}",
                                         daemon=True)
@@ -241,9 +250,11 @@ class Publisher:
         endpoints: dict[str, str] | None = None,
         ttl: int = 1,
         register: bool = True,
+        interface: str | None = None,
     ) -> None:
         self.name = name
-        self._field_types = {n: BuiltinType[t] for n, t in fields.items()}
+        self._field_types = {n: BuiltinType[t.removesuffix("[]")] for n, t in fields.items()}
+        self._field_is_array = {n: t.endswith("[]") for n, t in fields.items()}
         self._address = address
         self._publisher_id = publisher_id
         self._publisher_id_type = PublisherIdType[publisher_id_type]
@@ -254,7 +265,8 @@ class Publisher:
         self.registered = False
         host, port = transport.parse_address(address)
         self._target = (host, port)
-        self._socket = transport.open_send_socket(host, ttl=ttl)
+        self._socket = transport.open_send_socket(
+            host, ttl=ttl, interface=interface or os.environ.get("HYPERNOVA_INTERFACE"))
         if register:
             try:
                 _registry_call("PUT", f"{self._registry}/api/publications/{name}", {
@@ -286,6 +298,10 @@ class Publisher:
                 f"publication {self.name!r} fields mismatch: "
                 + (f"missing {sorted(missing)} " if missing else "")
                 + (f"unknown {sorted(unknown)}" if unknown else ""))
+        for field_name, value in values.items():
+            if self._field_is_array[field_name] != isinstance(value, (list, tuple)):
+                expected = "a list" if self._field_is_array[field_name] else "a scalar"
+                raise ValueError(f"field {field_name!r} expects {expected}, got {value!r}")
         stamp = datetime_to_opc(_timestamp or datetime.now(timezone.utc))
         statuses = _status or {}
         self._sequence = (self._sequence + 1) & 0xFFFF or 1

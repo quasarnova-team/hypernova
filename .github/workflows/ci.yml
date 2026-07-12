@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install -e ".[dev]"
+      - run: python -m pytest tests/ -q
+
+  cli-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - name: registry + pub + sub + browse, end to end on localhost
+        run: |
+          hypernova registry --store '' &
+          sleep 2
+          hypernova pub ci/smoke --address opc.udp://239.10.0.99:24870 \
+            --publisher-id 7 --writer-group-id 1 --dataset-writer-id 1 \
+            --field counter=INT32 --value counter=0 --ramp \
+            --interval 0.2 --count 200 --interface 127.0.0.1 &
+          hypernova sub ci/smoke --count 5 --timeout 30 --interface 127.0.0.1
+          hypernova browse

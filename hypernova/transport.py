@@ -50,11 +50,17 @@ def open_receive_socket(host: str, port: int, *, interface: str = "0.0.0.0") -> 
     return sock
 
 
-def open_send_socket(host: str, *, ttl: int = 1, loopback: bool = True) -> socket.socket:
+def open_send_socket(host: str, *, ttl: int = 1, loopback: bool = True,
+                     interface: str | None = None) -> socket.socket:
+    """`interface` pins multicast egress to one local address — essential on
+    dual-homed hosts (e.g. a machine with feet in ATCN and GPN)."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     if _is_multicast(host):
         sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, ttl)
         sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1 if loopback else 0)
+        if interface:
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF,
+                            socket.inet_aton(interface))
     sock.setblocking(False)
     return sock
 

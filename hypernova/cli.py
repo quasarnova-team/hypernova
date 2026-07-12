@@ -59,20 +59,27 @@ def _parse_fields(items) -> dict:
 
 def _parse_values(items, field_types) -> dict:
     from hypernova.wire import BuiltinType
+
+    def convert(builtin, raw):
+        if builtin.name in ("FLOAT", "DOUBLE"):
+            return float(raw)
+        if builtin.name == "STRING":
+            return raw
+        if builtin.name == "BOOLEAN":
+            return raw.lower() in ("1", "true", "yes")
+        return int(raw)
+
     values = {}
     for item in items or []:
         name, _, raw = item.partition("=")
         if name not in field_types:
             raise SystemExit(f"--value {name!r} is not a declared field")
-        builtin = BuiltinType[field_types[name]]
-        if builtin.name in ("FLOAT", "DOUBLE"):
-            values[name] = float(raw)
-        elif builtin.name == "STRING":
-            values[name] = raw
-        elif builtin.name == "BOOLEAN":
-            values[name] = raw.lower() in ("1", "true", "yes")
+        type_name = field_types[name]
+        builtin = BuiltinType[type_name.removesuffix("[]")]
+        if type_name.endswith("[]"):
+            values[name] = [convert(builtin, part) for part in raw.split(",")] if raw else []
         else:
-            values[name] = int(raw)
+            values[name] = convert(builtin, raw)
     return values
 
 
@@ -89,7 +96,8 @@ def _cmd_pub(args) -> int:
                    publisher_id=args.publisher_id,
                    writer_group_id=args.writer_group_id,
                    dataset_writer_id=args.dataset_writer_id,
-                   registry=args.registry, description=args.description) as publisher:
+                   registry=args.registry, description=args.description,
+                   interface=args.interface) as publisher:
         if not publisher.registered:
             print("note: registry unreachable — publishing unregistered", file=sys.stderr)
         sent = 0
@@ -111,7 +119,8 @@ def _cmd_sub(args) -> int:
     deadline = time.time() + args.timeout
     while True:
         try:
-            subscriber = Subscriber(args.name, registry=args.registry, network=args.network)
+            subscriber = Subscriber(args.name, registry=args.registry,
+                                    network=args.network, interface=args.interface)
             break
         except RegistryError as error:
             if time.time() >= deadline:
@@ -184,6 +193,7 @@ def main(argv=None) -> int:
     p.add_argument("--count", type=int, default=0, help="stop after N updates (0 = forever)")
     p.add_argument("--timeout", type=float, default=10.0,
                    help="give up after this many silent seconds")
+    p.add_argument("--interface", help="local address to receive on (dual-homed hosts)")
     p.set_defaults(func=_cmd_sub)
 
     p = sub.add_parser("pub", help="publish samples (also registers the name)")
@@ -197,6 +207,7 @@ def main(argv=None) -> int:
     p.add_argument("--interval", type=float, default=1.0)
     p.add_argument("--count", type=int, default=0, help="stop after N samples (0 = forever)")
     p.add_argument("--ramp", action="store_true", help="increment numeric values each sample")
+    p.add_argument("--interface", help="local address for multicast egress (dual-homed hosts)")
     p.add_argument("--registry")
     p.add_argument("--description", default="")
     p.set_defaults(func=_cmd_pub)

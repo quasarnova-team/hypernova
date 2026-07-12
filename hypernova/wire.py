@@ -240,6 +240,12 @@ def _encode_variant(out: _Writer, fv: FieldValue) -> None:
     if fv.type == BuiltinType.NULL or fv.value is None:
         out.u8(0)
         return
+    if isinstance(fv.value, (list, tuple)):
+        out.u8(int(fv.type) | _VARIANT_ARRAY_VALUES)
+        out.raw(struct.pack("<i", len(fv.value)))
+        for element in fv.value:
+            _encode_scalar(out, FieldValue(fv.type, element))
+        return
     out.u8(int(fv.type))
     _encode_scalar(out, fv)
 
@@ -354,6 +360,9 @@ class _Reader:
     def u32(self, what: str = "uint32") -> int:
         return struct.unpack("<I", self._take(4, what))[0]
 
+    def i32(self, what: str = "int32") -> int:
+        return struct.unpack("<i", self._take(4, what))[0]
+
     def i64(self, what: str = "int64") -> int:
         return struct.unpack("<q", self._take(8, what))[0]
 
@@ -370,10 +379,19 @@ class _Reader:
         self._take(n, what)
 
 
+def _decode_scalar(reader: _Reader, builtin: BuiltinType):
+    if builtin == BuiltinType.STRING:
+        return reader.string()
+    value = reader.unpack(_SCALAR_STRUCT[builtin], builtin.name)
+    if builtin == BuiltinType.BOOLEAN:
+        value = bool(value)
+    return value
+
+
 def _decode_variant(reader: _Reader) -> FieldValue:
     mask = reader.u8("variant mask")
-    if mask & (_VARIANT_ARRAY_VALUES | _VARIANT_ARRAY_DIMENSIONS):
-        raise WireError("array-valued fields are not supported")
+    if mask & _VARIANT_ARRAY_DIMENSIONS:
+        raise WireError("multi-dimensional arrays are not supported")
     type_id = mask & 0x3F
     try:
         builtin = BuiltinType(type_id)
@@ -381,12 +399,14 @@ def _decode_variant(reader: _Reader) -> FieldValue:
         raise WireError(f"unsupported variant type {type_id}") from None
     if builtin == BuiltinType.NULL:
         return FieldValue(BuiltinType.NULL, None)
-    if builtin == BuiltinType.STRING:
-        return FieldValue(builtin, reader.string())
-    value = reader.unpack(_SCALAR_STRUCT[builtin], builtin.name)
-    if builtin == BuiltinType.BOOLEAN:
-        value = bool(value)
-    return FieldValue(builtin, value)
+    if mask & _VARIANT_ARRAY_VALUES:
+        length = reader.i32("array length")
+        if length < 0:
+            return FieldValue(builtin, [])
+        if length > 1_000_000:
+            raise WireError(f"array length {length} is implausible")
+        return FieldValue(builtin, [_decode_scalar(reader, builtin) for _ in range(length)])
+    return FieldValue(builtin, _decode_scalar(reader, builtin))
 
 
 def _decode_datavalue(reader: _Reader) -> FieldValue:

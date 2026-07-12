@@ -28,8 +28,12 @@ class FieldSpec:
     name: str
     type: str
 
+    @property
+    def is_array(self) -> bool:
+        return self.type.endswith("[]")
+
     def builtin(self) -> BuiltinType:
-        return BuiltinType[self.type]
+        return BuiltinType[self.type.removesuffix("[]")]
 
 
 @dataclass
@@ -98,10 +102,12 @@ def _validate(publication: Publication) -> None:
         raise StoreError("a publication needs at least one field")
     seen = set()
     for spec in publication.fields:
-        if spec.type not in BuiltinType.__members__ or spec.type == "NULL":
+        base = spec.type.removesuffix("[]")
+        if base not in BuiltinType.__members__ or base == "NULL":
             raise StoreError(
                 f"field {spec.name!r} has unknown type {spec.type!r}: expected one of "
-                f"{', '.join(t for t in BuiltinType.__members__ if t != 'NULL')}")
+                f"{', '.join(t for t in BuiltinType.__members__ if t != 'NULL')} "
+                "(append [] for arrays)")
         if spec.name in seen:
             raise StoreError(f"duplicate field name {spec.name!r}")
         seen.add(spec.name)
