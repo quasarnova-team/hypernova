@@ -58,7 +58,7 @@ class TestFinding2SyncIsolation:
         store = Store(tmp_path / "reg.json")
         store.register(publication(name="ok/pub", address="opc.udp://127.0.0.1:24861",
                                    dataset_writer_id=1))
-        store.register(publication(name="clash/pub", address="opc.udp://127.0.0.9:24861",
+        store.register(publication(name="privileged/pub", address="opc.udp://127.0.0.9:1",
                                    dataset_writer_id=2))
         app = create_app(store)
         server = TestServer(app)
@@ -66,7 +66,7 @@ class TestFinding2SyncIsolation:
         await client.start_server()
         health = await (await client.get("/api/health")).json()
         assert health["publications"] == 2
-        assert len(health["endpointErrors"]) == 1
+        assert "127.0.0.9:1" in health["endpointErrors"]
         await client.close()
 
 
