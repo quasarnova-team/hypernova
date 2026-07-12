@@ -1,7 +1,7 @@
 {
   "routes": [
     {
-      "name": "atlas/dcs/demo/env",
+      "name": "site/area1/demo/env",
       "from": "opc.udp://239.0.0.5:4840",
       "to": ["opc.udp://172.29.0.20:24840"],
       "ttl": 1

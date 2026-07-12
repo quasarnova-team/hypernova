@@ -30,7 +30,7 @@ for i in $(seq 1 20); do
   curl -sf http://localhost:4850/api/health >/dev/null && break
   sleep 1
 done
-curl -sf -X PUT http://localhost:4850/api/publications/atlas/dcs/demo/env \
+curl -sf -X PUT http://localhost:4850/api/publications/site/area1/demo/env \
   -H 'Content-Type: application/json' -d '{
     "address": "opc.udp://239.0.0.5:4840",
     "endpoints": {"gpn": "opc.udp://172.29.0.20:24840"},
@@ -41,7 +41,7 @@ curl -sf -X PUT http://localhost:4850/api/publications/atlas/dcs/demo/env \
                {"name": "temperature", "type": "DOUBLE"},
                {"name": "label", "type": "STRING"}],
     "replace": true}' >/dev/null || { echo "registration failed"; exit 1; }
-echo "registered atlas/dcs/demo/env"
+echo "registered site/area1/demo/env"
 
 echo "== letting data flow for 6 seconds =="
 sleep 6

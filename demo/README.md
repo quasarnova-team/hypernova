@@ -18,7 +18,7 @@ What starts (see `compose.yaml` for the picture):
   datagrams unchanged to one unicast target on `gpn`. Counters at
   <http://localhost:4860/api/health>.
 - **consumer** — on `gpn` only; it can't see the multicast, doesn't know the
-  server, and still runs `hypernova sub atlas/dcs/demo/env --network gpn`:
+  server, and still runs `hypernova sub site/area1/demo/env --network gpn`:
   the registry hands it the relayed endpoint and named values arrive.
 
 The script registers the publication, waits, then **verifies every leg**

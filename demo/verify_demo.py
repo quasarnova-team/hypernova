@@ -20,7 +20,7 @@ def get(url):
 def main():
     failures = []
 
-    detail = get("http://localhost:4850/api/publications/atlas/dcs/demo/env")
+    detail = get("http://localhost:4850/api/publications/site/area1/demo/env")
     live = detail["live"]
     if live["stale"]:
         failures.append("registry: stream is stale on atcn")

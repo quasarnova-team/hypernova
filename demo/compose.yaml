@@ -56,7 +56,7 @@ services:
 
   consumer:
     image: hypernova:demo
-    command: ["sub", "atlas/dcs/demo/env",
+    command: ["sub", "site/area1/demo/env",
               "--registry", "http://registry:4850",
               "--network", "gpn", "--timeout", "3600"]
     restart: on-failure
