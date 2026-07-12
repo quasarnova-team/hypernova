@@ -154,6 +154,26 @@ def _cmd_sub(args) -> int:
     return 0
 
 
+def _cmd_bridge_opcua(args) -> int:
+    import asyncio
+    import logging
+    from hypernova.bridge_opcua import run_bridge
+    logging.basicConfig(level=logging.INFO)
+    verify_key = None
+    if args.verify_key_file:
+        from hypernova.keys import load_key
+        verify_key = load_key(args.verify_key_file)
+    asyncio.run(run_bridge(args.names, endpoint=args.endpoint, registry=args.registry,
+                           network=args.network, verify_key=verify_key))
+    return 0
+
+
+def _cmd_bridge_dip(args) -> int:
+    from hypernova.bridge_dip import run
+    run(args.config)
+    return 0
+
+
 def _cmd_register(args) -> int:
     from hypernova.client import _registry_call, default_registry_url
     fields = _parse_fields(args.field)
@@ -226,6 +246,20 @@ def main(argv=None) -> int:
     p.add_argument("--registry")
     p.add_argument("--description", default="")
     p.set_defaults(func=_cmd_pub)
+
+    p = sub.add_parser("bridge-opcua", help="serve publications as a classic OPC UA "
+                                            "server (WinCC OA-consumable)")
+    p.add_argument("names", nargs="+", help="publication names to bridge")
+    p.add_argument("--endpoint", default="opc.tcp://0.0.0.0:4840")
+    p.add_argument("--registry")
+    p.add_argument("--network")
+    p.add_argument("--verify-key-file")
+    p.set_defaults(func=_cmd_bridge_opcua)
+
+    p = sub.add_parser("bridge-dip", help="republish DIP publications as hypernova "
+                                          "streams (migration bridge; needs CERN DIP bindings)")
+    p.add_argument("config", help="bridge config JSON")
+    p.set_defaults(func=_cmd_bridge_dip)
 
     p = sub.add_parser("register", help="register a publication without publishing "
                                         "(e.g. for a supernova server)")

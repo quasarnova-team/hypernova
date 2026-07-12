@@ -42,3 +42,29 @@ jobs:
             --interval 0.2 --count 200 --interface 127.0.0.1 &
           hypernova sub ci/smoke --count 5 --timeout 30 --interface 127.0.0.1
           hypernova browse
+
+  java-client:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - name: Golden vectors (byte parity with the C++ and Python codecs)
+        working-directory: clients/java
+        run: |
+          javac --release 11 -d build $(find src -name "*.java")
+          java -cp build ch.quasarnova.hypernova.GoldenTest ../../tests/golden/vectors.json
+      - name: Live loop (Python publisher -> Java subscriber)
+        run: |
+          hypernova pub ci/javaloop --address opc.udp://127.0.0.1:24895 \
+            --publisher-id 21 --writer-group-id 2 --dataset-writer-id 2 \
+            --field counter=INT32 --field 'samples=DOUBLE[]' \
+            --value counter=0 --value samples=1.5,2.5 --ramp \
+            --interval 0.2 --count 300 --registry http://127.0.0.1:1 &
+          java -cp clients/java/build ch.quasarnova.hypernova.LiveLoopTest 24895 10
