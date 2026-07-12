@@ -91,10 +91,13 @@ def test_bad_values_raise_wire_error():
                                             pid=70000, pid_type=PublisherIdType.UINT16))
 
 
-def test_rejects_secured_and_chunked():
-    secured = bytes([0xF1, 0x01 | 0x10, 0x2A, 0x00, 0x01, 0x64, 0x00, 0x01, 0x01, 0x00])
-    with pytest.raises(WireError, match="secured"):
-        decode_network_message(secured)
+def test_rejects_encrypted_and_chunked():
+    encrypted = bytes([0xF1, 0x01 | 0x10, 0x2A, 0x00,       # flags, ext1(sec), pid
+                       0x01, 0x64, 0x00,                     # group header: wgid 100
+                       0x01, 0x01, 0x00,                     # payload count 1, writer 1
+                       0x02])                                # SecurityHeader: encrypted
+    with pytest.raises(WireError, match="encrypted"):
+        decode_network_message(encrypted)
     chunked = bytes([0xF1, 0x01 | 0x80, 0x01, 0x2A, 0x00])
     with pytest.raises(WireError, match="chunked"):
         decode_network_message(chunked)
@@ -153,3 +156,61 @@ def test_array_truncation_and_bounds():
         make_message([FieldValue(BuiltinType.INT32, [1])], pid_type=PublisherIdType.BYTE)))
     with pytest.raises(WireError):
         decode_network_message(bytes(absurd)[:14] + b"\xff\xff\xff\x7f" + bytes(absurd)[18:])
+
+
+class TestSigning:
+    KEY = b"0123456789abcdef0123456789abcdef"
+
+    def wire(self, **kw):
+        return encode_network_message(
+            make_message([FieldValue(BuiltinType.INT32, 7),
+                          FieldValue(BuiltinType.STRING, "signed")]), **kw)
+
+    def test_sign_verify_round_trip(self):
+        wire = self.wire(sign_key=self.KEY, security_token_id=5)
+        decoded = decode_network_message(wire, verify_key=self.KEY)
+        assert decoded.signed and decoded.verified is True
+        assert decoded.security_token_id == 5
+        assert decoded.messages[0].fields[0].value == 7
+
+    def test_unverified_parse_without_key(self):
+        decoded = decode_network_message(self.wire(sign_key=self.KEY))
+        assert decoded.signed and decoded.verified is None
+        assert decoded.messages[0].fields[1].value == "signed"
+
+    def test_wrong_key_rejected(self):
+        with pytest.raises(WireError, match="signature verification failed"):
+            decode_network_message(self.wire(sign_key=self.KEY), verify_key=b"x" * 32)
+
+    def test_every_single_bit_flip_detected(self):
+        wire = bytearray(self.wire(sign_key=self.KEY))
+        for index in range(len(wire)):
+            wire[index] ^= 0x01
+            try:
+                decode_network_message(bytes(wire), verify_key=self.KEY)
+                assert False, f"tamper at byte {index} went undetected"
+            except WireError:
+                pass
+            wire[index] ^= 0x01
+
+    def test_require_signed_rejects_unsigned(self):
+        with pytest.raises(WireError, match="unsigned frame rejected"):
+            decode_network_message(self.wire(), require_signed=True)
+        decoded = decode_network_message(self.wire(sign_key=self.KEY),
+                                         verify_key=self.KEY, require_signed=True)
+        assert decoded.verified
+
+    def test_signed_truncation_fuzz(self):
+        wire = self.wire(sign_key=self.KEY)
+        for cut in range(len(wire)):
+            with pytest.raises(WireError):
+                decode_network_message(wire[:cut], verify_key=self.KEY)
+
+    def test_short_key_refused(self):
+        with pytest.raises(WireError, match="at least 16 bytes"):
+            self.wire(sign_key=b"short")
+
+    def test_unsigned_frames_unchanged_by_feature(self):
+        plain = self.wire()
+        decoded = decode_network_message(plain)
+        assert not decoded.signed and decoded.verified is None

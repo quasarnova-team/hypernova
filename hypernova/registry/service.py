@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import time
 from pathlib import Path
+from urllib.parse import urljoin
 
 from aiohttp import web
 
@@ -88,12 +89,58 @@ def _publication_from_json(name: str, data: dict) -> Publication:
         raise StoreError(f"malformed registration: {error}") from None
 
 
-def create_app(store: Store, *, listen: bool = True) -> web.Application:
+def create_app(store: Store, *, listen: bool = True,
+               mirror_of: str | None = None) -> web.Application:
     """`listen=False` runs a pure phonebook: lookups and registration work,
     the live-browser columns stay empty (deployments behind unicast-only
-    reachability, or tests sharing one host with subscribers)."""
+    reachability, or tests sharing one host with subscribers).
+
+    `mirror_of` makes this instance a follower: every 10 s it pulls the
+    primary's publication list and merges anything it does not have (or has
+    older) — so a secondary that was down during registrations converges.
+    Followers still accept direct registrations (clients register with every
+    registry in their comma-separated list), so mirroring is convergence
+    insurance, not the primary mechanism."""
     listener = Listener(store)
     app = web.Application()
+    mirror_state = {"lastSync": None, "error": None}
+
+    async def _mirror_loop():
+        import aiohttp
+        while True:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(urljoin(mirror_of, "/api/publications"),
+                                           timeout=aiohttp.ClientTimeout(total=5)) as response:
+                        listed = await response.json()
+                for entry in listed:
+                    mine = store.get(entry["name"])
+                    if mine is None:
+                        try:
+                            store.register(_publication_from_json(entry["name"], entry),
+                                           replace=True)
+                        except StoreError:
+                            pass
+                mirror_state["lastSync"] = time.time()
+                mirror_state["error"] = None
+                if listen:
+                    await listener.sync()
+            except Exception as error:  # noqa: BLE001 — follower must survive anything
+                mirror_state["error"] = str(error)
+            await asyncio.sleep(10)
+
+    async def start_mirror(app_):
+        if mirror_of:
+            app_["mirror_task"] = asyncio.create_task(_mirror_loop())
+
+    async def stop_mirror(app_):
+        task = app_.get("mirror_task")
+        if task:
+            task.cancel()
+
+    app.on_startup.append(start_mirror)
+    app.on_cleanup.append(stop_mirror)
+    write_lock = asyncio.Lock()
 
     async def start_listener(app_):
         if listen:
@@ -122,7 +169,36 @@ def create_app(store: Store, *, listen: bool = True) -> web.Application:
         }
         if store.load_error:
             payload["storeLoadError"] = store.load_error
+        if mirror_of:
+            payload["mirrorOf"] = mirror_of
+            payload["mirrorLastSync"] = mirror_state["lastSync"]
+            payload["mirrorError"] = mirror_state["error"]
         return web.json_response(payload)
+
+    @routes.get("/metrics")
+    async def metrics(request):
+        now = time.time()
+        lines = [
+            "# TYPE hypernova_publications gauge",
+            f"hypernova_publications {len(store)}",
+            "# TYPE hypernova_undecodable_datagrams_total counter",
+            f"hypernova_undecodable_datagrams_total {listener.undecodable_datagrams}",
+            "# TYPE hypernova_endpoint_errors gauge",
+            f"hypernova_endpoint_errors {len(listener.endpoint_errors)}",
+        ]
+        lines.append("# TYPE hypernova_publication_messages_total counter")
+        lines.append("# TYPE hypernova_publication_lost_total counter")
+        lines.append("# TYPE hypernova_publication_stale gauge")
+        for publication in store.list():
+            live = listener.live(publication.name)
+            label = publication.name.replace("\\", "\\\\").replace('"', '\\"')
+            stale = 1 if (live.last_seen is None
+                          or now - live.last_seen > _STALE_AFTER_SECONDS) else 0
+            lines.append(f'hypernova_publication_messages_total{{name="{label}"}} {live.messages}')
+            lines.append(f'hypernova_publication_lost_total{{name="{label}"}} {live.lost}')
+            lines.append(f'hypernova_publication_stale{{name="{label}"}} {stale}')
+        return web.Response(text="\n".join(lines) + "\n",
+                            content_type="text/plain", charset="utf-8")
 
     @routes.get("/api/types")
     async def types(request):
@@ -154,7 +230,8 @@ def create_app(store: Store, *, listen: bool = True) -> web.Application:
                 return web.json_response({"error": "request body must be a JSON object"},
                                          status=400)
             publication = _publication_from_json(name, data)
-            store.register(publication, replace=bool(data.get("replace", False)))
+            async with write_lock:
+                store.register(publication, replace=bool(data.get("replace", False)))
         except StoreError as error:
             status = 409 if "already" in str(error) or "collision" in str(error) else 400
             return web.json_response({"error": str(error)}, status=status)
@@ -173,7 +250,8 @@ def create_app(store: Store, *, listen: bool = True) -> web.Application:
     @routes.delete("/api/publications/{name:.+}")
     async def remove(request):
         try:
-            store.remove(request.match_info["name"])
+            async with write_lock:
+                store.remove(request.match_info["name"])
         except StoreError as error:
             return web.json_response({"error": str(error)}, status=404)
         if listen:
@@ -200,6 +278,7 @@ def create_app(store: Store, *, listen: bool = True) -> web.Application:
     return app
 
 
-def run(host: str = "0.0.0.0", port: int = 4850, store_path: str | None = "registry.json") -> None:
+def run(host: str = "0.0.0.0", port: int = 4850, store_path: str | None = "registry.json",
+        mirror_of: str | None = None) -> None:
     store = Store(Path(store_path) if store_path else None)
-    web.run_app(create_app(store), host=host, port=port)
+    web.run_app(create_app(store, mirror_of=mirror_of), host=host, port=port)

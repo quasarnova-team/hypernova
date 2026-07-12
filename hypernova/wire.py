@@ -10,12 +10,16 @@ on request and always accepted on reception.
 
 from __future__ import annotations
 
+import hashlib
+import hmac as hmac_module
+import os
 import struct
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import IntEnum
 
 __all__ = [
+    "SIGNATURE_LENGTH",
     "BuiltinType",
     "PublisherIdType",
     "FieldValue",
@@ -146,6 +150,18 @@ _DV_SERVER_PICO = 0x20
 _VARIANT_ARRAY_DIMENSIONS = 0x40
 _VARIANT_ARRAY_VALUES = 0x80
 
+# SecurityHeader flags
+_SEC_SIGNED = 0x01
+_SEC_ENCRYPTED = 0x02
+_SEC_FOOTER = 0x04
+
+SIGNATURE_LENGTH = 32  # HMAC-SHA256
+_NONCE_LENGTH = 8
+
+
+def _signature(key: bytes, signed_bytes: bytes) -> bytes:
+    return hmac_module.new(key, signed_bytes, hashlib.sha256).digest()
+
 
 _UNIX_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 _MAX_UNIX_SECONDS = 253402300799  # 9999-12-31T23:59:59Z
@@ -206,6 +222,11 @@ class NetworkMessage:
     writer_group_id: int | None = None
     group_sequence_number: int | None = None
     messages: list[DataSetMessage] = field(default_factory=list)
+    #: set by the decoder: the frame carried a signature
+    signed: bool = False
+    #: set by the decoder: None = not checked (no key), True = HMAC verified
+    verified: bool | None = None
+    security_token_id: int = 0
 
 
 class _Writer:
@@ -296,18 +317,26 @@ def _encode_dataset_message(message: DataSetMessage, datavalue_fields: bool) -> 
     return out.getvalue()
 
 
-def encode_network_message(message: NetworkMessage, *, datavalue_fields: bool = True) -> bytes:
+def encode_network_message(message: NetworkMessage, *, datavalue_fields: bool = True,
+                           sign_key: bytes | None = None,
+                           security_token_id: int = 1) -> bytes:
     """Encode to UADP bytes. With ``datavalue_fields`` every field carries
     status + source timestamp (hypernova-native); without, plain Variant
-    fields byte-compatible with supernova's C++ publisher."""
+    fields byte-compatible with supernova's C++ publisher.
+
+    With ``sign_key`` the frame carries a Part 14 SecurityHeader (signed,
+    not encrypted) and an HMAC-SHA256 signature over the entire message —
+    the hypernova signing profile (see doc/security.md)."""
     if not message.messages:
         raise WireError("a NetworkMessage needs at least one DataSetMessage")
     if len(message.messages) > 255:
         raise WireError("too many DataSetMessages for one NetworkMessage")
+    if sign_key is not None and len(sign_key) < 16:
+        raise WireError("sign_key must be at least 16 bytes")
 
     out = _Writer()
     group_header = message.writer_group_id is not None or message.group_sequence_number is not None
-    extended1 = message.publisher_id_type != PublisherIdType.BYTE
+    extended1 = message.publisher_id_type != PublisherIdType.BYTE or sign_key is not None
 
     flags = _UADP_VERSION | _NM_PUBLISHER_ID | _NM_PAYLOAD_HEADER
     if group_header:
@@ -316,7 +345,10 @@ def encode_network_message(message: NetworkMessage, *, datavalue_fields: bool = 
         flags |= _NM_EXTENDED_FLAGS_1
     out.u8(flags)
     if extended1:
-        out.u8(int(message.publisher_id_type))
+        ext1 = int(message.publisher_id_type)
+        if sign_key is not None:
+            ext1 |= _EXT1_SECURITY
+        out.u8(ext1)
     try:
         out.raw(_PID_STRUCT[message.publisher_id_type].pack(message.publisher_id))
     except struct.error as error:
@@ -339,6 +371,12 @@ def encode_network_message(message: NetworkMessage, *, datavalue_fields: bool = 
     for dsm in message.messages:
         out.u16(dsm.dataset_writer_id)
 
+    if sign_key is not None:
+        out.u8(_SEC_SIGNED)
+        out.raw(struct.pack("<I", security_token_id))
+        out.u8(_NONCE_LENGTH)
+        out.raw(os.urandom(_NONCE_LENGTH))
+
     bodies = [_encode_dataset_message(dsm, datavalue_fields) for dsm in message.messages]
     if len(bodies) > 1:
         for body in bodies:
@@ -347,16 +385,27 @@ def encode_network_message(message: NetworkMessage, *, datavalue_fields: bool = 
             out.u16(len(body))
     for body in bodies:
         out.raw(body)
-    return out.getvalue()
+    wire = out.getvalue()
+    if sign_key is not None:
+        wire += _signature(sign_key, wire)
+    return wire
 
 
 class _Reader:
     def __init__(self, data: bytes) -> None:
         self._data = data
         self._pos = 0
+        self._end = len(data)
+
+    def limit(self, end: int) -> None:
+        """Cap parsing at `end` (e.g. to keep payload reads off a trailing
+        signature)."""
+        if end < self._pos:
+            raise WireError("truncated datagram: signature overlaps headers")
+        self._end = end
 
     def _take(self, n: int, what: str) -> bytes:
-        if self._pos + n > len(self._data):
+        if self._pos + n > self._end:
             raise WireError(f"truncated datagram: {what}")
         chunk = self._data[self._pos:self._pos + n]
         self._pos += n
@@ -481,9 +530,16 @@ def _decode_dataset_message(reader: _Reader) -> DataSetMessage:
     return dsm
 
 
-def decode_network_message(data: bytes) -> NetworkMessage:
+def decode_network_message(data: bytes, *, verify_key: bytes | None = None,
+                           require_signed: bool = False) -> NetworkMessage:
     """Decode a UADP datagram; raises WireError with a diagnostic on anything
-    unsupported (chunked, secured, promoted-only, arrays, raw encoding)."""
+    unsupported (chunked, encrypted, promoted-only payloads, raw encoding).
+
+    Signed frames (hypernova signing profile): with ``verify_key`` the
+    HMAC-SHA256 signature is checked and a mismatch raises WireError; without
+    a key the frame is still decoded and marked ``signed=True, verified=None``
+    (the registry's browsing mode). ``require_signed`` rejects unsigned
+    frames — the posture for subscribers beyond a network boundary."""
     reader = _Reader(data)
     flags = reader.u8("header flags")
     if flags & 0x0F != _UADP_VERSION:
@@ -546,8 +602,30 @@ def decode_network_message(data: bytes) -> NetworkMessage:
     if promoted:
         size = reader.u16("promoted fields size")
         reader.skip(size, "promoted fields")
+    signature_length = 0
     if security:
-        raise WireError("secured NetworkMessages are not supported")
+        sec_flags = reader.u8("SecurityHeader flags")
+        if sec_flags & _SEC_ENCRYPTED:
+            raise WireError("encrypted NetworkMessages are not supported")
+        if not sec_flags & _SEC_SIGNED:
+            raise WireError("SecurityHeader without the signed flag is not supported")
+        message.security_token_id = reader.u32("security token id")
+        nonce_length = reader.u8("nonce length")
+        reader.skip(nonce_length, "security nonce")
+        if sec_flags & _SEC_FOOTER:
+            reader.skip(2, "security footer size")
+        message.signed = True
+        signature_length = SIGNATURE_LENGTH
+        if len(data) < signature_length + 2:
+            raise WireError("signed frame shorter than its signature")
+        reader.limit(len(data) - signature_length)
+        if verify_key is not None:
+            expected = _signature(verify_key, data[:-signature_length])
+            if not hmac_module.compare_digest(expected, data[-signature_length:]):
+                raise WireError("signature verification failed (wrong key or tampered frame)")
+            message.verified = True
+    if require_signed and not message.signed:
+        raise WireError("unsigned frame rejected (require_signed is set)")
 
     if payload_header_enabled and count > 1:
         for _ in range(count):

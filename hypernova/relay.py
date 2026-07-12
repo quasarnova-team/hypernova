@@ -29,6 +29,8 @@ from pathlib import Path
 from aiohttp import web
 
 from hypernova import __version__, transport
+from hypernova.keys import load_key
+from hypernova.wire import WireError, decode_network_message, encode_network_message
 
 __all__ = ["Route", "Relay", "load_config", "run"]
 
@@ -39,9 +41,14 @@ class Route:
     source: str
     targets: list[str]
     ttl: int = 1
+    #: sign frames on re-emit (path to a key file in the config). Signing
+    #: routes re-encode — and therefore validate — every frame; raw routes
+    #: forward bytes untouched.
+    sign_key: bytes | None = None
 
     datagrams: int = 0
     bytes: int = 0
+    invalid: int = 0
     last_forwarded: float | None = None
     _sends: list = field(default_factory=list)
 
@@ -52,11 +59,15 @@ def load_config(path: str | Path) -> tuple[list[Route], int | None]:
     for entry in data.get("routes", []):
         if not entry.get("to"):
             raise ValueError(f"route {entry.get('name', '?')!r} has no targets")
+        sign_key = None
+        if entry.get("sign_key_file"):
+            sign_key = load_key(entry["sign_key_file"])
         routes.append(Route(
             name=entry.get("name", entry["from"]),
             source=entry["from"],
             targets=list(entry["to"]),
             ttl=int(entry.get("ttl", 1)),
+            sign_key=sign_key,
         ))
     if not routes:
         raise ValueError("relay config declares no routes")
@@ -84,6 +95,13 @@ class Relay:
             route._sends = sends
 
             def forward(data: bytes, addr, route=route) -> None:
+                if route.sign_key is not None:
+                    try:
+                        message = decode_network_message(data)
+                        data = encode_network_message(message, sign_key=route.sign_key)
+                    except WireError:
+                        route.invalid += 1
+                        return
                 for sock, target in route._sends:
                     try:
                         sock.sendto(data, target)
@@ -117,6 +135,8 @@ class Relay:
                     "to": r.targets,
                     "datagrams": r.datagrams,
                     "bytes": r.bytes,
+                    "invalidDropped": r.invalid,
+                    "signing": r.sign_key is not None,
                     "lastForwarded": r.last_forwarded,
                     "idleSeconds": None if r.last_forwarded is None
                                    else round(time.time() - r.last_forwarded, 3),

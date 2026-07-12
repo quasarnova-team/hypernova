@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass, field
 
 from hypernova import transport
-from hypernova.registry.store import Publication, Store
+from hypernova.registry.store import Store
 from hypernova.wire import FieldValue, WireError, decode_network_message
 
 _RATE_WINDOW_SECONDS = 30.0
@@ -103,9 +103,9 @@ class Listener:
         for dsm in message.messages:
             if dsm.keep_alive:
                 continue
-            publication = self._match(message.publisher_id,
-                                      message.writer_group_id or 0,
-                                      dsm.dataset_writer_id)
+            publication = self._store.find_stream(message.publisher_id,
+                                                  message.writer_group_id or 0,
+                                                  dsm.dataset_writer_id)
             if publication is None:
                 continue
             named = {}
@@ -116,11 +116,3 @@ class Listener:
                     named[f"field{index}"] = value
             self.live(publication.name).observe(named, dsm.sequence_number)
 
-    def _match(self, publisher_id: int, writer_group_id: int,
-               dataset_writer_id: int) -> Publication | None:
-        for publication in self._store.list():
-            if (publication.publisher_id == publisher_id
-                    and publication.writer_group_id == writer_group_id
-                    and publication.dataset_writer_id == dataset_writer_id):
-                return publication
-        return None

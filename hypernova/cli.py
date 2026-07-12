@@ -22,7 +22,7 @@ def _cmd_registry(args) -> int:
     from hypernova.registry.service import run
     print(f"hypernova-registry: http://{args.bind}:{args.port} "
           f"(store: {args.store or 'in-memory only'})")
-    run(host=args.bind, port=args.port, store_path=args.store)
+    run(host=args.bind, port=args.port, store_path=args.store, mirror_of=args.mirror_of)
     return 0
 
 
@@ -92,12 +92,16 @@ def _cmd_pub(args) -> int:
     missing = set(fields) - set(values)
     if missing:
         raise SystemExit(f"--value missing for {sorted(missing)}")
+    sign_key = None
+    if args.sign_key_file:
+        from hypernova.keys import load_key
+        sign_key = load_key(args.sign_key_file)
     with Publisher(args.name, fields=fields, address=args.address,
                    publisher_id=args.publisher_id,
                    writer_group_id=args.writer_group_id,
                    dataset_writer_id=args.dataset_writer_id,
                    registry=args.registry, description=args.description,
-                   interface=args.interface) as publisher:
+                   interface=args.interface, sign_key=sign_key) as publisher:
         if not publisher.registered:
             print("note: registry unreachable — publishing unregistered", file=sys.stderr)
         sent = 0
@@ -119,8 +123,14 @@ def _cmd_sub(args) -> int:
     deadline = time.time() + args.timeout
     while True:
         try:
+            verify_key = None
+            if args.verify_key_file:
+                from hypernova.keys import load_key
+                verify_key = load_key(args.verify_key_file)
             subscriber = Subscriber(args.name, registry=args.registry,
-                                    network=args.network, interface=args.interface)
+                                    network=args.network, interface=args.interface,
+                                    verify_key=verify_key,
+                                    require_signed=args.require_signed)
             break
         except RegistryError as error:
             if time.time() >= deadline:
@@ -176,6 +186,7 @@ def main(argv=None) -> int:
     p.add_argument("--port", type=int, default=4850)
     p.add_argument("--store", default="registry.json",
                    help="JSON persistence file ('' for in-memory)")
+    p.add_argument("--mirror-of", help="primary registry URL to converge from (secondary mode)")
     p.set_defaults(func=_cmd_registry)
 
     p = sub.add_parser("relay", help="run the boundary relay")
@@ -194,6 +205,9 @@ def main(argv=None) -> int:
     p.add_argument("--timeout", type=float, default=10.0,
                    help="give up after this many silent seconds")
     p.add_argument("--interface", help="local address to receive on (dual-homed hosts)")
+    p.add_argument("--verify-key-file", help="hex key file; verifies frame signatures")
+    p.add_argument("--require-signed", action="store_true",
+                   help="reject unsigned frames (default when a key is given)")
     p.set_defaults(func=_cmd_sub)
 
     p = sub.add_parser("pub", help="publish samples (also registers the name)")
@@ -208,6 +222,7 @@ def main(argv=None) -> int:
     p.add_argument("--count", type=int, default=0, help="stop after N samples (0 = forever)")
     p.add_argument("--ramp", action="store_true", help="increment numeric values each sample")
     p.add_argument("--interface", help="local address for multicast egress (dual-homed hosts)")
+    p.add_argument("--sign-key-file", help="hex key file; signs every frame")
     p.add_argument("--registry")
     p.add_argument("--description", default="")
     p.set_defaults(func=_cmd_pub)

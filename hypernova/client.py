@@ -120,8 +120,12 @@ class Subscriber:
         dataset_writer_id: int | None = None,
         field_names: list[str] | None = None,
         interface: str | None = None,
+        verify_key: bytes | None = None,
+        require_signed: bool = False,
     ) -> None:
         self.name = name
+        self._verify_key = verify_key
+        self._require_signed = require_signed or verify_key is not None
         self._registries = _registry_urls(registry)
         self._network = network
         self._interface = interface or os.environ.get("HYPERNOVA_INTERFACE") or "0.0.0.0"
@@ -219,7 +223,8 @@ class Subscriber:
             except OSError:
                 return
             try:
-                message = decode_network_message(data)
+                message = decode_network_message(data, verify_key=self._verify_key,
+                                                 require_signed=self._require_signed)
             except WireError:
                 self.undecodable_datagrams += 1
                 continue
@@ -263,6 +268,7 @@ class Publisher:
         ttl: int = 1,
         register: bool = True,
         interface: str | None = None,
+        sign_key: bytes | None = None,
     ) -> None:
         self.name = name
         self._field_types = {n: BuiltinType[t.removesuffix("[]")] for n, t in fields.items()}
@@ -273,6 +279,7 @@ class Publisher:
         self._writer_group_id = writer_group_id
         self._dataset_writer_id = dataset_writer_id
         self._registries = _registry_urls(registry)
+        self._sign_key = sign_key
         self._sequence = 0
         self.registered = False
         host, port = transport.parse_address(address)
@@ -337,7 +344,8 @@ class Publisher:
             writer_group_id=self._writer_group_id,
             group_sequence_number=self._sequence,
             messages=[dsm])
-        self._socket.sendto(encode_network_message(message), self._target)
+        self._socket.sendto(
+            encode_network_message(message, sign_key=self._sign_key), self._target)
 
     def close(self) -> None:
         self._socket.close()
