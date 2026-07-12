@@ -71,6 +71,7 @@ element in its config.xml
 | `hypernova relay` | The firewall exception as a process: joins streams on one network, re-emits to explicit targets on another. One auditable config per boundary — and it can **sign at the boundary** (below). |
 | `hypernova bridge-opcua` | Serves publications as a classic OPC UA server, so any OPC UA client — including commercial SCADA tools — can consume streams without Part 14 support. |
 | `hypernova bridge-dip` | The migration path: republish existing DIP publications as hypernova streams; consumers move one at a time, publishers untouched. |
+| `hypernova fx` | An [OPC UA FX](https://reference.opcfoundation.org/FX/AC/v100/docs/) connection manager: `fx connect` wires one FX server's output dataset to another's input dataset at runtime (publisher first, its coordinates handed to the subscriber side), `fx status` browses the live connection endpoints, `fx close` tears down. Works against [supernova](https://github.com/quasarnova-team/supernova)'s `Fx` module; `--register` makes the resulting stream a browsable publication. |
 | `hypernova sub/pub/browse/register` | The CLI for humans and scripts. |
 
 ## Signed where it matters
