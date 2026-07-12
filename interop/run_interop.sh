@@ -86,7 +86,7 @@ done
 docker logs hn-snova-sub 2>&1 | grep "PubSub: engine started" >/dev/null || {
   echo "DIRECTION 2 FAIL: supernova reader never started"; docker logs hn-snova-sub | tail -20; exit 1; }
 
-docker exec hn-py hypernova pub atlas/dcs/interop/reverse \
+docker exec hn-py hypernova pub site/area1/interop/reverse \
   --address opc.udp://239.0.0.9:4842 --publisher-id 77 \
   --writer-group-id 300 --dataset-writer-id 9 \
   --field mirror=INT32 --field temperature=DOUBLE \
