@@ -45,6 +45,7 @@ public final class Subscriber implements AutoCloseable {
     private final byte[] verifyKey;
     private final boolean requireSigned;
     private volatile boolean running = true;
+    public volatile long droppedUpdates = 0;
 
     public static Subscriber byName(String registries, String name, String network)
             throws IOException {
@@ -115,7 +116,7 @@ public final class Subscriber implements AutoCloseable {
                             ? coordinates.fieldNames.get(i) : "field" + i;
                     update.values.put(fieldName, dsm.fields.get(i));
                 }
-                queue.offer(update);
+                if (!queue.offer(update)) droppedUpdates++;
             }
         }
     }

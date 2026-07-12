@@ -59,8 +59,10 @@ def _publication_json(publication: Publication, listener: Listener, *, detail: b
             "rateHz": round(live.rate_hz, 2),
             "messages": live.messages,
             "lost": live.lost,
+            "signed": live.signed,
         },
         "leaseExpired": publication.lease_expired,
+        "registeredAt": publication.registered_at,
     }
     if detail:
         data["values"] = [
@@ -106,7 +108,9 @@ def create_app(store: Store, *, listen: bool = True,
     mirror_state = {"lastSync": None, "error": None}
 
     async def _mirror_loop():
+        import logging
         import aiohttp
+        logger = logging.getLogger("hypernova.registry.mirror")
         while True:
             try:
                 async with aiohttp.ClientSession() as session:
@@ -115,12 +119,15 @@ def create_app(store: Store, *, listen: bool = True,
                         listed = await response.json()
                 for entry in listed:
                     mine = store.get(entry["name"])
-                    if mine is None:
-                        try:
+                    # converge: adopt if absent, or if the primary's copy is newer
+                    if mine is not None and entry.get("registeredAt", 0) <= mine.registered_at:
+                        continue
+                    try:
+                        async with write_lock:
                             store.register(_publication_from_json(entry["name"], entry),
                                            replace=True)
-                        except StoreError:
-                            pass
+                    except StoreError as error:
+                        logger.info("mirror could not adopt %s: %s", entry["name"], error)
                 mirror_state["lastSync"] = time.time()
                 mirror_state["error"] = None
                 if listen:
@@ -137,6 +144,10 @@ def create_app(store: Store, *, listen: bool = True,
         task = app_.get("mirror_task")
         if task:
             task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
 
     app.on_startup.append(start_mirror)
     app.on_cleanup.append(stop_mirror)
@@ -191,7 +202,8 @@ def create_app(store: Store, *, listen: bool = True,
         lines.append("# TYPE hypernova_publication_stale gauge")
         for publication in store.list():
             live = listener.live(publication.name)
-            label = publication.name.replace("\\", "\\\\").replace('"', '\\"')
+            label = (publication.name.replace("\\", "\\\\")
+                     .replace('"', '\\"').replace("\n", "").replace("\r", ""))
             stale = 1 if (live.last_seen is None
                           or now - live.last_seen > _STALE_AFTER_SECONDS) else 0
             lines.append(f'hypernova_publication_messages_total{{name="{label}"}} {live.messages}')
@@ -242,7 +254,8 @@ def create_app(store: Store, *, listen: bool = True,
     @routes.post("/api/publications/{name:.+}/renew")
     async def renew(request):
         try:
-            publication = store.renew(request.match_info["name"])
+            async with write_lock:
+                publication = store.renew(request.match_info["name"])
         except StoreError as error:
             return web.json_response({"error": str(error)}, status=404)
         return web.json_response(_publication_json(publication, listener))

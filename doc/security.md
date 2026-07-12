@@ -43,7 +43,7 @@ until a full SecurityPolicy lands (roadmap). Unsigned interop is unaffected.
 |---|---|
 | Forged values (spoofed publisher ids) | ✅ rejected — every bit of a signed frame is authenticated (a test flips every single bit and asserts rejection) |
 | Tampering in flight | ✅ rejected |
-| Replay | 🟡 sequence numbers surface replays/duplicates to consumers; no cryptographic replay window yet |
+| Replay | 🟡 **no cryptographic replay protection**: a captured signed frame replays verbatim and verifies. Sequence numbers let consumers *notice* duplicates/reordering, but nothing rejects a replay. Acceptable for periodic telemetry (the next sample supersedes it); do not use the sign-only profile where a replayed value is itself dangerous |
 | Eavesdropping | ❌ frames are not encrypted — telemetry is treated as readable on any network it reaches |
 | Key distribution | operational: key files on publisher/relay/subscriber hosts. **Keys never pass through the registry** — it can browse signed streams (shown "signed, unverified") but never holds secrets |
 

@@ -45,6 +45,7 @@ INDEX_HTML = r"""<!doctype html>
   .badge.live { color:var(--good); border:1px solid var(--good); }
   .badge.stale { color:var(--bad); border:1px solid var(--bad); }
   .badge.lease { color:var(--ink-soft); border:1px solid var(--line); margin-left:6px; }
+  .badge.signed { color:var(--wire); border:1px solid var(--wire); margin-left:6px; }
   .detail { background:var(--surface); border:1px solid var(--line); border-radius:10px;
             padding:16px 20px; margin:10px 0 18px; }
   .detail h2 { margin:0 0 4px; font-size:16px; font-weight:800; }
@@ -140,11 +141,13 @@ function render() {
       : '<span class="badge live">live</span>';
     const lease = (p.leaseExpired && p.live.stale)
       ? '<span class="badge lease">lease expired</span>' : "";
+    const signed = p.live.signed
+      ? '<span class="badge signed" title="frames carry a signature; the registry holds no key, so it is not verified here">signed</span>' : "";
     html += `<tr class="pub" data-name="${esc(p.name)}">
       <td class="name">${esc(p.name)}</td>
       <td>${p.fields.map(f => esc(f.name)).join(", ")}</td>
       <td>${p.live.rateHz ? p.live.rateHz + " Hz" : "—"}</td>
-      <td>${live}${lease}</td>
+      <td>${live}${lease}${signed}</td>
       <td class="name">${esc(p.address)}</td></tr>`;
     if (openName === p.name) {
       html += `<tr><td colspan="5">${renderDetail(detailCache[p.name] || p)}</td></tr>`;

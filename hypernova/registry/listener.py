@@ -23,6 +23,9 @@ class LiveState:
     messages: int = 0
     lost: int = 0
     undecodable: int = 0
+    #: last frame carried a SecurityHeader signed flag (NOT verified — the
+    #: registry holds no keys; browsing values are advisory/spoofable).
+    signed: bool = False
     _last_sequence: int | None = None
     _arrivals: list[float] = field(default_factory=list)
 
@@ -103,6 +106,7 @@ class Listener:
         for dsm in message.messages:
             if dsm.keep_alive:
                 continue
+            publication_signed = message.signed
             publication = self._store.find_stream(message.publisher_id,
                                                   message.writer_group_id or 0,
                                                   dsm.dataset_writer_id)
@@ -114,5 +118,7 @@ class Listener:
                     named[publication.fields[index].name] = value
                 else:
                     named[f"field{index}"] = value
-            self.live(publication.name).observe(named, dsm.sequence_number)
+            state = self.live(publication.name)
+            state.signed = publication_signed
+            state.observe(named, dsm.sequence_number)
 

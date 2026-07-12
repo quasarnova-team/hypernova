@@ -1,7 +1,10 @@
 """The boundary relay: the firewall port-exception turned into a small,
 auditable process. Each route joins one stream on one side and re-emits the
-raw datagrams to explicit targets on the other — no decoding on the data
-path, so the relay can never corrupt what it carries.
+raw datagrams to explicit targets on the other. Plain routes forward bytes
+untouched. A *signing* route decodes and re-signs each frame with the
+boundary key (preserving field encoding and keep-alive); it authenticates
+the relay unless a ``verify_key_file`` is also set, in which case it first
+authenticates the origin and drops anything that does not verify.
 
 Config (JSON):
 
@@ -45,6 +48,8 @@ class Route:
     #: routes re-encode — and therefore validate — every frame; raw routes
     #: forward bytes untouched.
     sign_key: bytes | None = None
+    #: verify inbound signatures before re-signing (authenticate the origin).
+    verify_key: bytes | None = None
 
     datagrams: int = 0
     bytes: int = 0
@@ -59,15 +64,15 @@ def load_config(path: str | Path) -> tuple[list[Route], int | None]:
     for entry in data.get("routes", []):
         if not entry.get("to"):
             raise ValueError(f"route {entry.get('name', '?')!r} has no targets")
-        sign_key = None
-        if entry.get("sign_key_file"):
-            sign_key = load_key(entry["sign_key_file"])
+        sign_key = load_key(entry["sign_key_file"]) if entry.get("sign_key_file") else None
+        verify_key = load_key(entry["verify_key_file"]) if entry.get("verify_key_file") else None
         routes.append(Route(
             name=entry.get("name", entry["from"]),
             source=entry["from"],
             targets=list(entry["to"]),
             ttl=int(entry.get("ttl", 1)),
             sign_key=sign_key,
+            verify_key=verify_key,
         ))
     if not routes:
         raise ValueError("relay config declares no routes")
@@ -97,8 +102,15 @@ class Relay:
             def forward(data: bytes, addr, route=route) -> None:
                 if route.sign_key is not None:
                     try:
-                        message = decode_network_message(data)
-                        data = encode_network_message(message, sign_key=route.sign_key)
+                        # verify_key set => authenticate the ORIGIN before re-signing
+                        # (else boundary signing authenticates only the relay).
+                        message = decode_network_message(
+                            data, verify_key=route.verify_key,
+                            require_signed=route.verify_key is not None)
+                        # datavalue_fields=None preserves each message's original
+                        # field encoding; keep-alive frames stay keep-alive.
+                        data = encode_network_message(
+                            message, datavalue_fields=None, sign_key=route.sign_key)
                     except WireError:
                         route.invalid += 1
                         return
@@ -137,6 +149,7 @@ class Relay:
                     "bytes": r.bytes,
                     "invalidDropped": r.invalid,
                     "signing": r.sign_key is not None,
+                    "verifyingOrigin": r.verify_key is not None,
                     "lastForwarded": r.last_forwarded,
                     "idleSeconds": None if r.last_forwarded is None
                                    else round(time.time() - r.last_forwarded, 3),

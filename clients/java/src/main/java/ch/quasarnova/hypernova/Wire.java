@@ -189,6 +189,9 @@ public final class Wire {
 
     /** Decode a datagram; verifyKey null = accept unsigned and signed-unverified. */
     public static NetworkMessage decode(byte[] data, byte[] verifyKey, boolean requireSigned) {
+        if (requireSigned && verifyKey == null) {
+            throw new WireException("require signed needs a verify key: the signed flag alone is unauthenticated");
+        }
         Reader reader = new Reader(data);
         int flags = reader.u8("header flags");
         if ((flags & 0x0F) != 1) throw new WireException("unsupported UADP version " + (flags & 0x0F));
@@ -262,7 +265,9 @@ public final class Wire {
                 message.verified = Boolean.TRUE;
             }
         }
-        if (requireSigned && !message.signed) throw new WireException("unsigned frame rejected (require signed)");
+        if (requireSigned && !Boolean.TRUE.equals(message.verified)) {
+            throw new WireException("frame is not cryptographically verified (require signed is set)");
+        }
 
         if (payloadHeader && count > 1) {
             for (int i = 0; i < count; i++) reader.u16("DataSetMessage sizes");
@@ -275,12 +280,27 @@ public final class Wire {
         return message;
     }
 
+    private static void requireRange(long value, long min, long max, String type) {
+        if (value < min || value > max) {
+            throw new WireException("value " + value + " does not fit " + type);
+        }
+    }
+
     private static void encodeScalarBody(ByteBuffer out, BuiltinType type, Object value) {
         switch (type) {
             case BOOLEAN: out.put((byte) (((Boolean) value) ? 1 : 0)); break;
-            case SBYTE: case BYTE: out.put((byte) ((Number) value).longValue()); break;
-            case INT16: case UINT16: out.putShort((short) ((Number) value).longValue()); break;
-            case INT32: case UINT32: out.putInt((int) ((Number) value).longValue()); break;
+            case SBYTE: requireRange(((Number) value).longValue(), -128, 127, "SByte");
+                out.put((byte) ((Number) value).longValue()); break;
+            case BYTE: requireRange(((Number) value).longValue(), 0, 255, "Byte");
+                out.put((byte) ((Number) value).longValue()); break;
+            case INT16: requireRange(((Number) value).longValue(), -32768, 32767, "Int16");
+                out.putShort((short) ((Number) value).longValue()); break;
+            case UINT16: requireRange(((Number) value).longValue(), 0, 65535, "UInt16");
+                out.putShort((short) ((Number) value).longValue()); break;
+            case INT32: requireRange(((Number) value).longValue(), -2147483648L, 2147483647L, "Int32");
+                out.putInt((int) ((Number) value).longValue()); break;
+            case UINT32: requireRange(((Number) value).longValue(), 0, 4294967295L, "UInt32");
+                out.putInt((int) ((Number) value).longValue()); break;
             case INT64: case UINT64: case DATETIME: out.putLong(((Number) value).longValue()); break;
             case FLOAT: out.putFloat(((Number) value).floatValue()); break;
             case DOUBLE: out.putDouble(((Number) value).doubleValue()); break;
@@ -318,19 +338,33 @@ public final class Wire {
         if ((mask & 0x04) != 0) out.putLong(field.sourceTimestamp);
     }
 
+    private static int payloadElements(NetworkMessage message) {
+        int elements = 0;
+        for (DataSetMessage dsm : message.messages) {
+            for (FieldValue field : dsm.fields) {
+                elements += field.isArray() ? ((java.util.List<?>) field.value).size() + 1 : 1;
+            }
+        }
+        return elements;
+    }
+
     /** Encode; dataValueFields carries quality+timestamp per field. */
     public static byte[] encode(NetworkMessage message, boolean dataValueFields, byte[] signKey) {
         if (message.messages.isEmpty()) throw new WireException("a NetworkMessage needs at least one DataSetMessage");
-        ByteBuffer out = ByteBuffer.allocate(65536).order(ByteOrder.LITTLE_ENDIAN);
+        int capacity = Math.max(65536, 128 + payloadElements(message) * 16);
+        ByteBuffer out = ByteBuffer.allocate(capacity).order(ByteOrder.LITTLE_ENDIAN);
         boolean groupHeader = message.writerGroupId != null || message.groupSequenceNumber != null;
         boolean ext1Needed = message.publisherIdType != 0 || signKey != null;
         int flags = 1 | 0x10 | 0x40 | (groupHeader ? 0x20 : 0) | (ext1Needed ? 0x80 : 0);
         out.put((byte) flags);
         if (ext1Needed) out.put((byte) (message.publisherIdType | (signKey != null ? 0x10 : 0)));
         switch (message.publisherIdType) {
-            case 0: out.put((byte) message.publisherId); break;
-            case 1: out.putShort((short) message.publisherId); break;
-            case 2: out.putInt((int) message.publisherId); break;
+            case 0: requireRange(message.publisherId, 0, 255, "Byte publisher id");
+                out.put((byte) message.publisherId); break;
+            case 1: requireRange(message.publisherId, 0, 65535, "UInt16 publisher id");
+                out.putShort((short) message.publisherId); break;
+            case 2: requireRange(message.publisherId, 0, 4294967295L, "UInt32 publisher id");
+                out.putInt((int) message.publisherId); break;
             case 3: out.putLong(message.publisherId); break;
             default: throw new WireException("unsupported publisher id type");
         }
@@ -353,7 +387,7 @@ public final class Wire {
         }
         List<byte[]> bodies = new ArrayList<>();
         for (DataSetMessage dsm : message.messages) {
-            ByteBuffer body = ByteBuffer.allocate(65536).order(ByteOrder.LITTLE_ENDIAN);
+            ByteBuffer body = ByteBuffer.allocate(capacity).order(ByteOrder.LITTLE_ENDIAN);
             int flags1 = 0x01 | ((dataValueFields ? 2 : 0) << 1)
                        | (dsm.sequenceNumber != null ? 0x08 : 0);
             body.put((byte) flags1);

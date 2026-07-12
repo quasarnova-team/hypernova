@@ -194,8 +194,18 @@ class TestSigning:
             wire[index] ^= 0x01
 
     def test_require_signed_rejects_unsigned(self):
-        with pytest.raises(WireError, match="unsigned frame rejected"):
+        # require_signed with no key is a usage error: the signed flag alone proves nothing
+        with pytest.raises(WireError, match="needs a verify_key"):
             decode_network_message(self.wire(), require_signed=True)
+        # unsigned frame, key present -> rejected (not verified)
+        with pytest.raises(WireError, match="not cryptographically verified"):
+            decode_network_message(self.wire(), verify_key=self.KEY, require_signed=True)
+        # a self-asserted signed frame with a bogus signature -> rejected under a key
+        forged = bytearray(self.wire(sign_key=self.KEY))
+        forged[-1] ^= 0xFF
+        with pytest.raises(WireError):
+            decode_network_message(bytes(forged), verify_key=self.KEY, require_signed=True)
+        # genuine signed + right key -> accepted
         decoded = decode_network_message(self.wire(sign_key=self.KEY),
                                          verify_key=self.KEY, require_signed=True)
         assert decoded.verified

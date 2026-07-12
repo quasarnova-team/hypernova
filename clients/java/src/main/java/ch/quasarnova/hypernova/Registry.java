@@ -44,8 +44,10 @@ public final class Registry {
             }
             try {
                 return parse(fetch(url.toString()));
-            } catch (IOException error) {
-                lastError = error;
+            } catch (IOException | RuntimeException error) {
+                lastError = error instanceof IOException
+                        ? (IOException) error
+                        : new IOException("registry answer unparseable: " + error.getMessage());
             }
         }
         throw lastError != null ? lastError : new IOException("no registry URL given");
@@ -67,7 +69,7 @@ public final class Registry {
     static Coordinates parse(String json) throws IOException {
         Coordinates coordinates = new Coordinates();
         coordinates.address = firstGroup(ADDRESS, json, "address");
-        coordinates.publisherId = Long.parseLong(firstGroup(PUBLISHER, json, "publisherId"));
+        coordinates.publisherId = Long.parseUnsignedLong(firstGroup(PUBLISHER, json, "publisherId"));
         coordinates.writerGroupId = Integer.parseInt(firstGroup(GROUP, json, "writerGroupId"));
         coordinates.dataSetWriterId = Integer.parseInt(firstGroup(WRITER, json, "dataSetWriterId"));
         int fieldsStart = json.indexOf("\"fields\"");

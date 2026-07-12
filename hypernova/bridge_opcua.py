@@ -13,6 +13,7 @@ DataSetMessage. Requires the [bridge] extra (asyncua).
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import logging
 
 from hypernova.client import Subscriber
@@ -56,6 +57,10 @@ async def run_bridge(names: list[str], *, endpoint: str, registry: str | None = 
 
     subscribers: list[Subscriber] = []
     variables: dict[tuple[str, str], object] = {}
+    # one worker per pump so all publications are serviced regardless of the
+    # default executor's size (finding: pumps could starve each other).
+    executor = concurrent.futures.ThreadPoolExecutor(
+        max_workers=max(len(names), 1), thread_name_prefix="hypernova-bridge")
 
     objects = server.nodes.objects
     for name in names:
@@ -64,7 +69,7 @@ async def run_bridge(names: list[str], *, endpoint: str, registry: str | None = 
                                       verify_key=verify_key))
         subscribers.append(subscriber)
         node = await objects.add_object(namespace, name.replace("/", "."))
-        for field in subscriber._coords.get("fields", []):
+        for field in subscriber.fields():
             variable = await node.add_variable(
                 namespace, field["name"], 0.0 if "DOUBLE" in str(field.get("type", ""))
                 else ua.Variant(None))
@@ -75,7 +80,7 @@ async def run_bridge(names: list[str], *, endpoint: str, registry: str | None = 
         loop = asyncio.get_running_loop()
         subscriber.start()
         while True:
-            update = await loop.run_in_executor(None, _next_update, subscriber)
+            update = await loop.run_in_executor(executor, _next_update, subscriber)
             if update is None:
                 continue
             for field_name, field in update.values.items():
@@ -89,11 +94,16 @@ async def run_bridge(names: list[str], *, endpoint: str, registry: str | None = 
                     logger.warning("bridge write %s.%s failed: %s",
                                    subscriber.name, field_name, error)
 
-    async with server:
-        logger.info("bridge serving %d publication(s) at %s", len(names), endpoint)
-        if ready_event is not None:
-            ready_event.set()
-        await asyncio.gather(*(pump(subscriber) for subscriber in subscribers))
+    try:
+        async with server:
+            logger.info("bridge serving %d publication(s) at %s", len(names), endpoint)
+            if ready_event is not None:
+                ready_event.set()
+            await asyncio.gather(*(pump(subscriber) for subscriber in subscribers))
+    finally:
+        for subscriber in subscribers:
+            subscriber.stop()
+        executor.shutdown(wait=False)
 
 
 def _next_update(subscriber: Subscriber):

@@ -213,6 +213,9 @@ class DataSetMessage:
     sequence_number: int | None = None
     keep_alive: bool = False
     fields: list[FieldValue] = field(default_factory=list)
+    #: wire field encoding this message was decoded from (0=Variant,
+    #: 2=DataValue); used to re-encode faithfully (e.g. in the relay).
+    field_encoding: int = _FIELD_ENCODING_DATAVALUE
 
 
 @dataclass
@@ -299,9 +302,18 @@ def _encode_datavalue(out: _Writer, fv: FieldValue) -> None:
         out.raw(struct.pack("<q", fv.source_timestamp))
 
 
-def _encode_dataset_message(message: DataSetMessage, datavalue_fields: bool) -> bytes:
+def _encode_dataset_message(message: DataSetMessage, datavalue_fields) -> bytes:
     out = _Writer()
-    encoding = _FIELD_ENCODING_DATAVALUE if datavalue_fields else _FIELD_ENCODING_VARIANT
+    if datavalue_fields is None:
+        use_datavalue = message.field_encoding == _FIELD_ENCODING_DATAVALUE
+    else:
+        use_datavalue = datavalue_fields
+    encoding = _FIELD_ENCODING_DATAVALUE if use_datavalue else _FIELD_ENCODING_VARIANT
+    if message.keep_alive:
+        # keep-alive: valid + flags2, message type 3, no field count/fields
+        out.u8(_DSM_VALID | _DSM_FLAGS_2)
+        out.u8(_DSM_TYPE_KEEP_ALIVE)
+        return out.getvalue()
     flags1 = _DSM_VALID | (encoding << 1)
     if message.sequence_number is not None:
         flags1 |= _DSM_SEQUENCE_NUMBER
@@ -310,14 +322,14 @@ def _encode_dataset_message(message: DataSetMessage, datavalue_fields: bool) -> 
         out.u16(message.sequence_number & 0xFFFF)
     out.u16(len(message.fields))
     for fv in message.fields:
-        if datavalue_fields:
+        if use_datavalue:
             _encode_datavalue(out, fv)
         else:
             _encode_variant(out, fv)
     return out.getvalue()
 
 
-def encode_network_message(message: NetworkMessage, *, datavalue_fields: bool = True,
+def encode_network_message(message: NetworkMessage, *, datavalue_fields=True,
                            sign_key: bytes | None = None,
                            security_token_id: int = 1) -> bytes:
     """Encode to UADP bytes. With ``datavalue_fields`` every field carries
@@ -521,6 +533,7 @@ def _decode_dataset_message(reader: _Reader) -> DataSetMessage:
     if encoding == _FIELD_ENCODING_RAW:
         raise WireError("RawData field encoding is not supported")
 
+    dsm.field_encoding = encoding
     count = reader.u16("field count")
     for _ in range(count):
         if encoding == _FIELD_ENCODING_VARIANT:
@@ -538,8 +551,12 @@ def decode_network_message(data: bytes, *, verify_key: bytes | None = None,
     Signed frames (hypernova signing profile): with ``verify_key`` the
     HMAC-SHA256 signature is checked and a mismatch raises WireError; without
     a key the frame is still decoded and marked ``signed=True, verified=None``
-    (the registry's browsing mode). ``require_signed`` rejects unsigned
-    frames — the posture for subscribers beyond a network boundary."""
+    (the registry's browsing mode). ``require_signed`` rejects any frame that
+    is not cryptographically verified — it REQUIRES ``verify_key`` (a
+    self-asserted signed bit proves nothing), and is the posture for
+    subscribers beyond a network boundary."""
+    if require_signed and verify_key is None:
+        raise WireError("require_signed needs a verify_key: the signed flag alone is unauthenticated")
     reader = _Reader(data)
     flags = reader.u8("header flags")
     if flags & 0x0F != _UADP_VERSION:
@@ -624,8 +641,8 @@ def decode_network_message(data: bytes, *, verify_key: bytes | None = None,
             if not hmac_module.compare_digest(expected, data[-signature_length:]):
                 raise WireError("signature verification failed (wrong key or tampered frame)")
             message.verified = True
-    if require_signed and not message.signed:
-        raise WireError("unsigned frame rejected (require_signed is set)")
+    if require_signed and message.verified is not True:
+        raise WireError("frame is not cryptographically verified (require_signed is set)")
 
     if payload_header_enabled and count > 1:
         for _ in range(count):

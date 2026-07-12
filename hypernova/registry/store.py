@@ -146,6 +146,9 @@ class Store:
             try:
                 for data in json.loads(self._path.read_text()):
                     publication = Publication.from_json(data)
+                    _validate(publication)  # never trust a hand-edited store file
+                    if publication.stream_key in self._by_stream:
+                        continue  # drop duplicate wire triples from a corrupt file
                     self._by_name[publication.name] = publication
                     self._by_stream[publication.stream_key] = publication
             except (ValueError, TypeError, KeyError) as error:

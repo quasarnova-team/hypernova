@@ -54,25 +54,32 @@ class TestFinding1PortValidation:
 
 
 class TestFinding2SyncIsolation:
-    async def test_one_bad_endpoint_never_kills_service_or_others(self, tmp_path):
-        path = tmp_path / "reg.json"
-        good = Store(path)
-        good.register(publication(name="ok/pub", address="opc.udp://127.0.0.1:24861",
-                                  dataset_writer_id=1))
-        data = json.loads(path.read_text())
-        legacy = dict(data[0], name="legacy/pub", address="opc.udp://127.0.0.9:0",
-                      dataset_writer_id=2)
-        path.write_text(json.dumps(data + [legacy]))
+    async def test_one_bad_endpoint_never_kills_service_or_others(self, tmp_path, monkeypatch):
+        # Inject a bind failure for one endpoint (deterministic across platforms,
+        # unlike relying on privileged-port or EADDRINUSE semantics) and assert
+        # the listener records it and still binds the others and serves.
+        import hypernova.transport as transport_module
+        real_create = transport_module.create_receiver
 
-        store = Store(path)
-        assert store.load_error is None
+        async def flaky_create(host, port, on_datagram, *, interface="0.0.0.0"):
+            if port == 24866:
+                raise OSError("simulated bind failure")
+            return await real_create(host, port, on_datagram, interface=interface)
+
+        monkeypatch.setattr("hypernova.registry.listener.transport.create_receiver", flaky_create)
+
+        store = Store(tmp_path / "reg.json")
+        store.register(publication(name="ok/pub", address="opc.udp://239.10.9.1:24861",
+                                   dataset_writer_id=1))
+        store.register(publication(name="blocked/pub", address="opc.udp://127.0.0.1:24866",
+                                   publisher_id=2, dataset_writer_id=2))
         app = create_app(store)
         server = TestServer(app)
         client = TestClient(server)
         await client.start_server()
         health = await (await client.get("/api/health")).json()
         assert health["publications"] == 2
-        assert "opc.udp://127.0.0.9:0" in health["endpointErrors"]
+        assert any("24866" in key for key in health["endpointErrors"])
         detail = await client.get("/api/publications/ok/pub")
         assert detail.status == 200
         await client.close()

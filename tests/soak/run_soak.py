@@ -12,7 +12,7 @@ crossed without phantom loss. Results are printed as a JSON report.
 import argparse
 import json
 import os
-import resource
+
 import subprocess
 import sys
 import threading
@@ -29,17 +29,25 @@ GROUP = "opc.udp://239.10.7.{n}:24867"
 KEY = bytes(range(32))
 
 
-def rss_mb() -> float:
-    usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    return usage / (1024 * 1024 if sys.platform == "darwin" else 1024)
+def rss_mb(pid: int) -> float:
+    """CURRENT resident set of `pid` (not a high-water mark), via ps."""
+    out = subprocess.run(["ps", "-o", "rss=", "-p", str(pid)],
+                         capture_output=True, text=True)
+    try:
+        return int(out.stdout.strip()) / 1024
+    except ValueError:
+        return -1.0
 
 
-def open_fds() -> int:
-    import glob
-    if sys.platform == "darwin":
-        out = subprocess.run(["lsof", "-p", str(os.getpid())], capture_output=True, text=True)
-        return max(len(out.stdout.splitlines()) - 1, 0)
-    return len(glob.glob("/proc/self/fd/*"))
+def open_fds(pid: int) -> int:
+    """Open file descriptors of `pid`."""
+    if sys.platform == "linux":
+        try:
+            return len(os.listdir(f"/proc/{pid}/fd"))
+        except OSError:
+            return -1
+    out = subprocess.run(["lsof", "-p", str(pid)], capture_output=True, text=True)
+    return max(len(out.stdout.splitlines()) - 1, 0)
 
 
 def main() -> int:
@@ -116,6 +124,7 @@ def main() -> int:
     samples = []
     deadline = time.time() + args.minutes * 60
     baseline_rss = None
+    baseline_fds = None
     while time.time() < deadline:
         time.sleep(30)
         health = json.loads(urllib.request.urlopen(
@@ -127,12 +136,14 @@ def main() -> int:
         churn.send(x=1)
         churn.close()
         sample = {"t": round(time.time() - (deadline - args.minutes * 60), 1),
-                  "rssMB": round(rss_mb(), 1), "fds": open_fds(),
+                  "registryRssMB": round(rss_mb(registry.pid), 1),
+                  "registryFds": open_fds(registry.pid),
                   "received": received, "sent0": sent[0],
                   "registryPublications": health["publications"],
                   "registryUndecodable": health["undecodableDatagrams"]}
-        if baseline_rss is None and sample["t"] > 120:
-            baseline_rss = sample["rssMB"]
+        if baseline_rss is None:  # first sample after 30 s warm-up
+            baseline_rss = sample["registryRssMB"]
+            baseline_fds = sample["registryFds"]
         samples.append(sample)
         print(json.dumps(sample), flush=True)
 
@@ -149,17 +160,19 @@ def main() -> int:
         failures.append(f"{phantom_loss} duplicate/phantom sequence events")
     if sent[0] < 65536:
         failures.append(f"sequence wrap never crossed ({sent[0]} < 65536) — run longer")
-    if baseline_rss and samples and samples[-1]["rssMB"] > baseline_rss * 1.5 + 30:
-        failures.append(f"RSS grew {baseline_rss} -> {samples[-1]['rssMB']} MB")
-    if len(samples) >= 4 and samples[-1]["fds"] > samples[1]["fds"] + 20:
-        failures.append(f"fd leak: {samples[1]['fds']} -> {samples[-1]['fds']}")
+    if baseline_rss and samples and samples[-1]["registryRssMB"] > baseline_rss * 1.5 + 30:
+        failures.append(f"registry RSS grew {baseline_rss} -> {samples[-1]['registryRssMB']} MB")
+    if baseline_fds and samples and samples[-1]["registryFds"] > baseline_fds + 20:
+        failures.append(f"registry fd leak: {baseline_fds} -> {samples[-1]['registryFds']}")
 
     report = {"minutes": args.minutes, "publishers": args.publishers,
               "rateHz": args.rate_hz, "sentPerPublisher": sent[0],
               "received": received, "lossFraction": round(loss, 5),
               "gapsObserved": gaps, "sequenceWraps": sent[0] // 65536,
-              "finalRssMB": samples[-1]["rssMB"] if samples else None,
-              "finalFds": samples[-1]["fds"] if samples else None,
+              "registryBaselineRssMB": baseline_rss,
+              "registryFinalRssMB": samples[-1]["registryRssMB"] if samples else None,
+              "registryBaselineFds": baseline_fds,
+              "registryFinalFds": samples[-1]["registryFds"] if samples else None,
               "failures": failures}
     print("SOAK REPORT " + json.dumps(report), flush=True)
 

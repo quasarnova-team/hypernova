@@ -104,6 +104,13 @@ class DipBridge:
         self.errors = 0
 
     def start(self) -> None:
+        try:
+            self._start()
+        except Exception:
+            self.stop()
+            raise
+
+    def _start(self) -> None:
         factory = self._dip.create("hypernova-dip-bridge")
         for subscription in self._config.subscriptions:
             publisher = Publisher(
@@ -166,7 +173,11 @@ class _Handler:
 def run(config_path: str, *, dip_module=None) -> None:
     config = load_bridge_config(config_path)
     bridge = DipBridge(config, dip_module=dip_module)
-    bridge.start()
+    try:
+        bridge.start()
+    except Exception:
+        bridge.stop()
+        raise
     names = ", ".join(s.dip_name for s in config.subscriptions)
     print(f"hypernova-dip-bridge: forwarding {len(config.subscriptions)} "
           f"DIP publication(s): {names}")

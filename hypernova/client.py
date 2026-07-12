@@ -125,6 +125,10 @@ class Subscriber:
     ) -> None:
         self.name = name
         self._verify_key = verify_key
+        # require_signed enforces cryptographic verification, so it needs a key;
+        # a key implies enforcement. require_signed=True without a key is a usage error.
+        if require_signed and verify_key is None:
+            raise ValueError("require_signed needs verify_key — the signed bit alone is unauthenticated")
         self._require_signed = require_signed or verify_key is not None
         self._registries = _registry_urls(registry)
         self._network = network
@@ -143,6 +147,10 @@ class Subscriber:
         self._stop = threading.Event()
         self.dropped_updates = 0
         self.undecodable_datagrams = 0
+
+    def fields(self) -> list:
+        """Field descriptors (name, type) from the resolved coordinates."""
+        return list(self._coords.get("fields", []))
 
     def _lookup(self) -> dict:
         last_error: RegistryError | None = None
