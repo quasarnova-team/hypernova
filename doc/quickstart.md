@@ -51,10 +51,11 @@ still works, from its coordinate cache.
 
 ## 5. Browse
 
-Open <http://localhost:4850>: the namespace, live values with quality and
-source time, message rate, staleness, loss counters — and for every
-publication a copy-paste Python subscriber and a supernova `DataSetReader`
-XML snippet.
+Open <http://localhost:4850>: navigate the **namespace tree** on the left
+(branches roll up their children's live/stale state), select a stream, and
+watch its values with quality and source time, message rate, loss counters,
+and a **per-field sparkline** — plus a copy-paste Python subscriber and
+supernova `DataSetReader` for every publication. Dark/light, deep-linkable.
 
 ## 6. The same, in Python
 

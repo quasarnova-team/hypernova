@@ -19,9 +19,10 @@ any Part 14 implementation, and every
 [quasar](https://github.com/quasar-team/quasar)/[supernova](https://github.com/quasarnova-team/supernova)
 OPC UA server is already a native publisher with five lines of config.
 
-<p align="center"><img src="doc/images/browser-detail.png" width="820" alt="The registry's live browser: a real C++ field server's values, quality and rates, with copy-paste subscriber snippets"></p>
-<p align="center"><em>The registry's live browser: a real supernova C++ server publishing at 10 Hz — values, quality,
-loss counters, and a copy-paste subscriber for every publication. Deep-linkable per publication.</em></p>
+<p align="center"><img src="doc/images/browser.png" width="880" alt="The hypernova registry browser: a live namespace tree and an instrument-style stream pane"></p>
+<p align="center"><em>The registry browser — DIP's browser, remade: a live namespace tree (with per-branch rollup state)
+and an instrument pane for the selected stream — values, quality, rate, and a per-field sparkline,
+fed by a real supernova C++ server at 10 Hz. Deep-linkable, dark/light, zero dependencies.</em></p>
 
 ## Five lines, either direction
 
@@ -62,7 +63,7 @@ element in its config.xml
 
 | | |
 |---|---|
-| `hypernova registry` | The phonebook that listens: lookups, collision refusal, leases, per-network endpoints, primary/secondary failover, Prometheus `/metrics` — and the **live web browser** above. Advisory by design: data flows without it. |
+| `hypernova registry` | The phonebook that listens: lookups, collision refusal, leases, per-network endpoints, primary/secondary failover, Prometheus `/metrics` — and the **live namespace browser** above (tree navigation, per-field sparklines, quality, copy-paste subscribers). Advisory by design: data flows without it. |
 | `hypernova` / Java client | Publish & subscribe by name; per-field OPC UA status + source timestamp; scalars and arrays; coordinate caching (registry-down resilient). |
 | `hypernova relay` | The firewall exception as a process: joins streams on one network, re-emits to explicit targets on another. One auditable config per boundary — and it can **sign at the boundary** (below). |
 | `hypernova bridge-opcua` | Serves publications as a classic OPC UA server — **WinCC OA consumes hypernova streams today**, no Part 14 needed. |
