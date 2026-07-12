@@ -1,0 +1,52 @@
+site_name: hypernova
+site_description: Publish/subscribe data interchange for control systems, on OPC UA Pub/Sub (Part 14).
+site_url: https://quasarnova-team.github.io/hypernova/
+repo_url: https://github.com/quasarnova-team/hypernova
+repo_name: quasarnova-team/hypernova
+docs_dir: doc
+copyright: "© 2026 the quasarnova team"
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: deep orange
+      toggle:
+        icon: material/weather-sunny
+        name: Light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: black
+      accent: deep orange
+      toggle:
+        icon: material/weather-night
+        name: Dark mode
+  features:
+    - navigation.sections
+    - navigation.footer
+    - content.code.copy
+  icon:
+    logo: material/star-four-points
+    repo: fontawesome/brands/github
+
+markdown_extensions:
+  - admonition
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Quickstart: quickstart.md
+  - API: api.md
+  - Security: security.md
+  - Deployment: deployment.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/quasarnova-team
