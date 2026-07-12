@@ -24,8 +24,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from hypernova.client import Publisher, Subscriber  # noqa: E402
 
-REGISTRY_PORT = 4867
-GROUP = "opc.udp://239.10.7.{n}:24867"
+REGISTRY_PORT = 4850 + (os.getpid() % 900)
+GROUP_PORT = 24000 + (os.getpid() % 900)
+GROUP = "opc.udp://239.10.7.{n}:" + str(GROUP_PORT)
 KEY = bytes(range(32))
 
 
@@ -64,6 +65,11 @@ def main() -> int:
         cwd=str(Path(__file__).resolve().parents[2]))
     time.sleep(2)
     registry_url = f"http://localhost:{REGISTRY_PORT}"
+    if registry.poll() is not None or rss_mb(registry.pid) <= 0:
+        print("SOAK REPORT " + json.dumps(
+            {"failures": ["registry did not start or is not measurable "
+                          f"(pid {registry.pid}, port {REGISTRY_PORT})"]}), flush=True)
+        return 1
 
     publishers = []
     for index in range(args.publishers):
@@ -160,9 +166,13 @@ def main() -> int:
         failures.append(f"{phantom_loss} duplicate/phantom sequence events")
     if sent[0] < 65536:
         failures.append(f"sequence wrap never crossed ({sent[0]} < 65536) — run longer")
-    if baseline_rss and samples and samples[-1]["registryRssMB"] > baseline_rss * 1.5 + 30:
+    if not baseline_rss or baseline_rss <= 0:
+        failures.append("registry RSS was never measurable (>0) — harness cannot assert memory")
+    elif samples[-1]["registryRssMB"] > baseline_rss * 1.5 + 30:
         failures.append(f"registry RSS grew {baseline_rss} -> {samples[-1]['registryRssMB']} MB")
-    if baseline_fds and samples and samples[-1]["registryFds"] > baseline_fds + 20:
+    if not baseline_fds or baseline_fds <= 0:
+        failures.append("registry fds were never measurable (>0) — harness cannot assert fds")
+    elif samples[-1]["registryFds"] > baseline_fds + 20:
         failures.append(f"registry fd leak: {baseline_fds} -> {samples[-1]['registryFds']}")
 
     report = {"minutes": args.minutes, "publishers": args.publishers,
