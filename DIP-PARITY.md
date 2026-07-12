@@ -16,12 +16,15 @@ the capability exists with strictly more than DIP provides.
 | Publisher API (C++) | supernova/quasar servers publish via config.xml — zero code; custom C++ via any Part 14 stack (open62541 verified) | ✅ |
 | Subscriber API (C++) | supernova `DataSetReader` (config.xml, values land in the address space); open62541 for standalone apps | ✅ |
 | Publisher/Subscriber API (Python) | `hypernova.Publisher` / `hypernova.Subscriber` — five lines, DIP-flat | ✅ new |
-| Java API | No native client yet. Path: [Eclipse Milo](https://github.com/eclipse-milo/milo) (Java Part 14 stack) + the registry's plain REST lookup | 🟡 roadmap |
+| Java API | Native, dependency-free client ([clients/java](clients/java)): subscribe/publish by name, arrays, quality, signature verify — byte-parity with the C++/Python codecs proven on shared golden vectors | ✅ |
 | Cross-domain reachability (TN↔GPN) | Relay pinholes (explicit, auditable, per-stream) or plain unicast UADP through a firewall rule — DIP's own model | ✅ |
 | Publication liveness | Leases + continuous listening: the browser shows stale/lost/rate, which DIPNS never knew | ✅ better |
 | Name-server redundancy | DIP-style primary/secondary: `HYPERNOVA_REGISTRY` takes comma-separated registries — lookups fail over in order, publishers register with every one; plus data flows with no registry at all and subscribers cache coordinates | ✅ |
+| Migration from DIP | `hypernova bridge-dip`: republishes existing DIP publications as hypernova streams (pipeline CI-tested against a stubbed DIP API; on-site validation against a real DIPNS pending CERN network access) | ✅ (site validation pending) |
+| WinCC OA consumption | `hypernova bridge-opcua`: publications served as a classic OPC UA server — consumed by WinCC OA today, verified with an OPC UA client end-to-end | ✅ |
 | Smoothing | Not offered — DIP doesn't offer it either | ➖ parity |
-| Access control / archiving | Not offered — DIP doesn't offer them either; Part 14 message signing is the v1 hardening item | ➖ parity |
+| Message authentication | HMAC-SHA256 signatures in the Part 14 SecurityHeader — publisher-side, boundary-relay-side, verified in Python and Java. **Beyond DIP** (which has none) | ✅ better |
+| Access control / archiving | Not offered — DIP doesn't offer them either | ➖ parity |
 
 **Beyond DIP** (no DIP equivalent): standard wire format readable by any OPC UA
 Part 14 implementation (proven against open62541 and supernova's C++ engine,

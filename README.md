@@ -1,26 +1,27 @@
 <h1 align="center">hypernova</h1>
 <p align="center"><strong>The next era of DIP</strong> — publish/subscribe data interchange for control systems,<br>built on OPC UA Pub/Sub (Part 14).</p>
 
+<p align="center">
+  <a href="https://github.com/quasarnova-team/hypernova/actions/workflows/ci.yml"><img src="https://github.com/quasarnova-team/hypernova/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/quasarnova-team/hypernova/releases/latest"><img src="https://img.shields.io/github/v/release/quasarnova-team/hypernova" alt="Release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-BSD_2--Clause-blue.svg" alt="License"></a>
+  <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+">
+  <img src="https://img.shields.io/badge/java-11%2B-orange" alt="Java 11+">
+</p>
+
 ---
 
 CERN's DIP proved the shape: named publications, a name server, subscribe by
-name, values with quality and timestamp. **hypernova keeps the shape and
-replaces the substance with the industry standard** — publications are OPC UA
-Part 14 datasets over UDP, readable by any Part 14 implementation, and every
+name, values with quality and timestamp — 55,000+ publications strong.
+**hypernova keeps the shape and replaces the substance with the industry
+standard.** Publications are OPC UA Part 14 datasets over UDP, readable by
+any Part 14 implementation, and every
 [quasar](https://github.com/quasar-team/quasar)/[supernova](https://github.com/quasarnova-team/supernova)
 OPC UA server is already a native publisher with five lines of config.
 
-```
-publisher (C++ server or Python) ──multicast──► every listener on the segment
-        │                                              ▲
-        │ register("atlas/dcs/atca/crate1/env")        │ subscribe by name
-        ▼                                              │
-   ┌─────────────────────────────────────────────────────────┐
-   │ registry — the phonebook that listens:                  │
-   │ names, lookups, collision refusal, live browser         │
-   └─────────────────────────────────────────────────────────┘
-        boundaries crossed by explicit relay pinholes, DIP-style
-```
+<p align="center"><img src="doc/images/browser-detail.png" width="820" alt="The registry's live browser: a real C++ field server's values, quality and rates, with copy-paste subscriber snippets"></p>
+<p align="center"><em>The registry's live browser: a real supernova C++ server publishing at 10 Hz — values, quality,
+loss counters, and a copy-paste subscriber for every publication. Deep-linkable per publication.</em></p>
 
 ## Five lines, either direction
 
@@ -43,51 +44,79 @@ with Publisher("atlas/dcs/demo/env",
     pub.send(temperature=21.5, counts=[1, 2, 3])
 ```
 
-A supernova C++ server publishes the same stream with no code at all — a
-`<PubSub>` element in its config.xml (see the
-[supernova Pub/Sub documentation](https://github.com/quasarnova-team/supernova/blob/master/Documentation/source/PubSub.rst)).
+The same, from **Java** ([clients/java](clients/java) — dependency-free, JDK 11+):
+
+```java
+try (Subscriber sub = Subscriber.byName("http://registry:4850",
+                                        "atlas/dcs/atca/crate1/env", null)) {
+    Subscriber.Update update = sub.take(5000);
+    System.out.println(update.values.get("temperature").value);
+}
+```
+
+And a supernova C++ server publishes with **no code at all** — a `<PubSub>`
+element in its config.xml
+([documentation](https://github.com/quasarnova-team/supernova/blob/master/Documentation/source/PubSub.rst)).
 
 ## The pieces
 
 | | |
 |---|---|
-| `hypernova registry` | The phonebook that listens: name lookups, collision refusal, leases, per-network endpoints — and a **live web browser** of every registered stream (values, quality, rates, staleness, loss counters, copy-paste subscriber snippets). |
-| `hypernova` (Python package) | `Publisher` / `Subscriber` by name; values carry per-field OPC UA status and source timestamp. Subscribers cache coordinates — the registry can die and data keeps flowing. |
-| `hypernova relay` | The firewall exception as a process: joins streams on one network, re-emits them to explicit targets on another. One auditable config file per boundary. |
+| `hypernova registry` | The phonebook that listens: lookups, collision refusal, leases, per-network endpoints, primary/secondary failover, Prometheus `/metrics` — and the **live web browser** above. Advisory by design: data flows without it. |
+| `hypernova` / Java client | Publish & subscribe by name; per-field OPC UA status + source timestamp; scalars and arrays; coordinate caching (registry-down resilient). |
+| `hypernova relay` | The firewall exception as a process: joins streams on one network, re-emits to explicit targets on another. One auditable config per boundary — and it can **sign at the boundary** (below). |
+| `hypernova bridge-opcua` | Serves publications as a classic OPC UA server — **WinCC OA consumes hypernova streams today**, no Part 14 needed. |
+| `hypernova bridge-dip` | The migration path: republish existing DIP publications as hypernova streams; consumers move one at a time, publishers untouched. |
 | `hypernova sub/pub/browse/register` | The CLI for humans and scripts. |
 
-## Try it
+## Signed where it matters
+
+Frames carry an optional Part 14 SecurityHeader with an HMAC-SHA256
+signature — sign at the **publisher**, at the **boundary relay** (unsigned
+inside the trusted network, signed the moment it leaves), verify at any
+subscriber (Python or Java). Every bit of a signed frame is authenticated;
+a subscriber with a key rejects unsigned frames outright. Details and honest
+limits: [doc/security.md](doc/security.md).
+
+## Proven, not promised
+
+- **Byte-identical codecs across three languages**: the Python and Java
+  encoders reproduce, bit for bit, golden vectors generated by supernova's
+  C++ engine — and live interop runs against real C++ servers on **both**
+  quasar backends, both directions, including arrays round-tripping
+  *through* a C++ server's address space ([interop/](interop/)).
+- **DIP scale**: 55,000 publications register in 0.33 s; name and stream
+  lookups answer in under a microsecond; the store persists and reloads in
+  half a second ([tests/test_scale_and_ops.py](tests/test_scale_and_ops.py)).
+- **Soaked**: multi-publisher signed+unsigned soak across the 16-bit
+  sequence wrap with zero loss, flat memory and flat file descriptors
+  ([tests/soak/](tests/soak/), results in [QUALITY.md](QUALITY.md)).
+- **Adversarially reviewed, twice** — every finding fixed and
+  regression-locked ([QUALITY.md](QUALITY.md)).
+- The full two-network DIP-replacement topology — C++ field server,
+  registry, relay pinhole, remote consumer — runs self-verified with one
+  command: [`demo/run_demo.sh`](demo/).
+
+## Get started
 
 ```bash
-pip install hypernova            # or: pip install -e . from a checkout
-hypernova registry &             # phonebook + browser on :4850
-hypernova pub demo/hello --address opc.udp://239.10.0.9:14840 \
-    --publisher-id 7 --writer-group-id 1 --dataset-writer-id 1 \
-    --field counter=INT32 --value counter=0 --ramp --interval 0.5 &
-hypernova sub demo/hello         # values, by name
-open http://localhost:4850      # watch it live
+pip install "hypernova[bridge] @ git+https://github.com/quasarnova-team/hypernova"
+# (PyPI's "hypernova" is an unrelated package — install from git or ghcr)
+docker run --rm -p 4850:4850 ghcr.io/quasarnova-team/hypernova registry
 ```
 
-The full DIP-replacement topology — C++ field server, two networks, relay
-pinhole, consumer by name — runs with one command: [`demo/run_demo.sh`](demo/).
-
-## Interoperability, proven not promised
-
-- The Python encoder is **byte-identical** to supernova's C++ PubSub engine on
-  golden vectors generated by the C++ code itself.
-- Live bidirectional exchange with supernova servers on **both** quasar
-  backends (Unified Automation and open62541) runs in [`interop/`](interop/).
-- The wire profile is the one open62541's Pub/Sub tutorials speak.
+Ten-minute tour: [doc/quickstart.md](doc/quickstart.md) · API:
+[doc/api.md](doc/api.md) · deploying across real network boundaries (+
+systemd units in [deploy/](deploy/)): [doc/deployment.md](doc/deployment.md)
 
 ## Reading
 
 - [VISION.md](VISION.md) — why DIP's next era looks like this
-- [ARCHITECTURE.md](ARCHITECTURE.md) — components, flows, failure model, security posture
+- [ARCHITECTURE.md](ARCHITECTURE.md) — components, flows, failure model
 - [DIP-PARITY.md](DIP-PARITY.md) — the zero-gap matrix against DIP
-- [doc/quickstart.md](doc/quickstart.md) — ten minutes, from nothing to browsing live data
-- [doc/api.md](doc/api.md) — Python API, REST API, CLI
-- [doc/deployment.md](doc/deployment.md) — running it across real network boundaries
+- [doc/security.md](doc/security.md) — the signing profile and its limits
+- [QUALITY.md](QUALITY.md) — the scored quality record
 
 Part of the [quasarnova](https://github.com/quasarnova-team) family
-(supernova: the C++ engine; kilonova: pure-Python servers; hypernova: the
+(supernova: the C++ engine · kilonova: pure-Python servers · hypernova: the
 interchange fabric). License: BSD-2-Clause.

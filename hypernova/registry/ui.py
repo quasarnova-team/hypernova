@@ -78,14 +78,19 @@ INDEX_HTML = r"""<!doctype html>
 <script>
 "use strict";
 let publications = [];
-let openName = null;
+let openName = decodeURIComponent(location.hash.slice(1)) || null;
 let detailCache = {};
 
 const el = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
+let detailPrimed = false;
 async function refresh() {
   try {
+    if (openName && !detailPrimed) {
+      detailPrimed = true;
+      detailCache[openName] = await fetch("/api/publications/" + openName).then(r => r.ok ? r.json() : null);
+    }
     const [pubs, health] = await Promise.all([
       fetch("/api/publications").then(r => r.json()),
       fetch("/api/health").then(r => r.json()),
@@ -151,6 +156,7 @@ function render() {
     row.addEventListener("click", async () => {
       const name = row.dataset.name;
       openName = openName === name ? null : name;
+      history.replaceState(null, "", openName ? "#" + encodeURIComponent(openName) : " ");
       if (openName) {
         detailCache[name] = await fetch("/api/publications/" + name).then(r => r.ok ? r.json() : null);
       }
