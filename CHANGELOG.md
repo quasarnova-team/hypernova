@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.1.0 (2026-07-13)
+
+The FX connection manager — hypernova learns OPC UA FX (Parts 80/81):
+
+- **`hypernova fx connect`** wires one FX server's output dataset to another's
+  input dataset at runtime: publisher side first, its returned wire
+  coordinates handed to the subscriber side as the peer; on subscriber refusal
+  the publisher side is closed again (no half-open links).
+- **`hypernova fx status`** browses a server's live `ConnectionEndpoints`;
+  **`hypernova fx close`** tears a connection down by id.
+- **`--register / --register-as / --network`** turn the established stream into
+  a first-class hypernova publication — field names *and types* read from the
+  publisher's FX view — so an engineered link shows live in the registry
+  browser alongside ad-hoc consumers on the same wire.
+- Targets any server exposing the FX pattern; today that is
+  [supernova >= 1.2.0](https://github.com/quasarnova-team/supernova) with an
+  `<Fx>` configuration section. Requires the `[bridge]` extra (asyncua).
+- 5 new unit tests (publisher-first ordering, coordinate handoff, rollback on
+  subscriber refusal, projection type map) — 87 tests total, green. Verified
+  end to end against real supernova servers in all four backend combinations;
+  registry synergy checked live (typed registration + the registry's message
+  counter climbing on the FX stream).
+
+The core (registry, clients, relay, bridges, signing) is unchanged — 1.1.0 is
+purely additive. Docs: [doc/fx.md](doc/fx.md).
+
 ## 1.0.0 (2026-07-12)
 
 The consolidation release — every v0.1 gap closed:

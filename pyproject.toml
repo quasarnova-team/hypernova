@@ -1,6 +1,6 @@
 [project]
 name = "hypernova"
-version = "1.0.0"
+version = "1.1.0"
 description = "DIP's proven shape — named publications, a registry, subscribe by name — rebuilt on OPC UA Pub/Sub (Part 14). Python & Java clients, boundary relays."
 readme = "README.md"
 requires-python = ">=3.10"
