@@ -55,18 +55,26 @@ class TestFinding1PortValidation:
 
 class TestFinding2SyncIsolation:
     async def test_one_bad_endpoint_never_kills_service_or_others(self, tmp_path):
-        store = Store(tmp_path / "reg.json")
-        store.register(publication(name="ok/pub", address="opc.udp://127.0.0.1:24861",
-                                   dataset_writer_id=1))
-        store.register(publication(name="privileged/pub", address="opc.udp://127.0.0.9:1",
-                                   dataset_writer_id=2))
+        path = tmp_path / "reg.json"
+        good = Store(path)
+        good.register(publication(name="ok/pub", address="opc.udp://127.0.0.1:24861",
+                                  dataset_writer_id=1))
+        data = json.loads(path.read_text())
+        legacy = dict(data[0], name="legacy/pub", address="opc.udp://127.0.0.9:0",
+                      dataset_writer_id=2)
+        path.write_text(json.dumps(data + [legacy]))
+
+        store = Store(path)
+        assert store.load_error is None
         app = create_app(store)
         server = TestServer(app)
         client = TestClient(server)
         await client.start_server()
         health = await (await client.get("/api/health")).json()
         assert health["publications"] == 2
-        assert "127.0.0.9:1" in health["endpointErrors"]
+        assert "opc.udp://127.0.0.9:0" in health["endpointErrors"]
+        detail = await client.get("/api/publications/ok/pub")
+        assert detail.status == 200
         await client.close()
 
 
