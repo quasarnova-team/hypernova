@@ -11,8 +11,8 @@
 
 ---
 
-> **Status: first release — v0.1.0, early.** Every claim below links to its
-> evidence; hardening continues in the open.
+> **Status: released — early.** Every claim below links to its evidence;
+> hardening continues in the open.
 
 hypernova is inspired by the shape that CERN's DIP proved at scale: named
 publications, a name server, subscribe by name, values with quality and
