@@ -57,7 +57,7 @@ status + source time). `renew()` refreshes the registry lease.
 
 `encode_network_message(message, *, datavalue_fields=True)` /
 `decode_network_message(data)` — the UADP profile spoken by supernova and
-open62541 (see [ARCHITECTURE.md](../ARCHITECTURE.md)). Raises `WireError`
+open62541 (see [ARCHITECTURE.md](https://github.com/quasarnova-team/hypernova/blob/master/ARCHITECTURE.md)). Raises `WireError`
 with a diagnostic on anything unsupported. Scalars and one-dimensional
 arrays of: Boolean, SByte, Byte, Int16, UInt16, Int32, UInt32, Int64,
 UInt64, Float, Double, String, DateTime.
