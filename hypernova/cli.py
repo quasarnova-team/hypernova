@@ -174,6 +174,50 @@ def _cmd_bridge_dip(args) -> int:
     return 0
 
 
+def _cmd_fx_connect(args) -> int:
+    import asyncio
+    import json as _json
+    import logging
+    from hypernova.fx import connect_pair
+    logging.basicConfig(level=logging.INFO)
+    result = asyncio.run(connect_pair(
+        publisher_url=args.publisher, publisher_component=args.pub_component,
+        publisher_entity=args.pub_entity, publisher_dataset=args.pub_dataset,
+        subscriber_url=args.subscriber, subscriber_component=args.sub_component,
+        subscriber_entity=args.sub_entity, subscriber_dataset=args.sub_dataset,
+        address=args.address, interval=args.interval, name=args.name, ttl=args.ttl,
+        register=args.register, register_as=args.register_as, network=args.network))
+    print(_json.dumps(result, indent=2))
+    return 0
+
+
+def _cmd_fx_status(args) -> int:
+    import asyncio
+    from hypernova.fx import endpoints
+    found = asyncio.run(endpoints(args.url, component=args.component))
+    if not found:
+        print("no connection endpoints")
+        return 0
+    for record in found:
+        line = (f"{record['component']}/{record['entity']}/{record['connection']}: "
+                f"{record.get('status', '?')}")
+        extras = {k: v for k, v in record.items()
+                  if k not in ("component", "entity", "connection", "status")}
+        if extras:
+            line += "  " + "  ".join(f"{k}={v}" for k, v in sorted(extras.items()))
+        print(line)
+    return 0
+
+
+def _cmd_fx_close(args) -> int:
+    import asyncio
+    from hypernova.fx import close
+    detail = asyncio.run(close(args.url, component=args.component,
+                               connection_id=args.connection_id))
+    print(detail.get("status", "closed"))
+    return 0
+
+
 def _cmd_register(args) -> int:
     from hypernova.client import _registry_call, default_registry_url
     fields = _parse_fields(args.field)
@@ -260,6 +304,41 @@ def main(argv=None) -> int:
                                           "streams (migration bridge; needs CERN DIP bindings)")
     p.add_argument("config", help="bridge config JSON")
     p.set_defaults(func=_cmd_bridge_dip)
+
+    p = sub.add_parser("fx", help="OPC UA FX connection manager: wire two FX servers "
+                                  "together (needs the [bridge] extra)")
+    fx_sub = p.add_subparsers(dest="fx_command", required=True)
+
+    q = fx_sub.add_parser("connect", help="establish publisher side, then subscriber "
+                                          "side with the publisher's coordinates")
+    q.add_argument("--publisher", required=True, metavar="OPC_TCP_URL")
+    q.add_argument("--pub-entity", required=True)
+    q.add_argument("--pub-dataset", required=True)
+    q.add_argument("--pub-component", help="AutomationComponent name (default: discover)")
+    q.add_argument("--subscriber", required=True, metavar="OPC_TCP_URL")
+    q.add_argument("--sub-entity", required=True)
+    q.add_argument("--sub-dataset", required=True)
+    q.add_argument("--sub-component", help="AutomationComponent name (default: discover)")
+    q.add_argument("--address", required=True, help="opc.udp:// data-plane address")
+    q.add_argument("--interval", type=float, help="publishing interval in ms")
+    q.add_argument("--name", help="connection name (default: server-assigned)")
+    q.add_argument("--ttl", type=int)
+    q.add_argument("--register", metavar="REGISTRY_URL",
+                   help="also register the stream in a hypernova registry")
+    q.add_argument("--register-as", metavar="NAME", help="publication name for --register")
+    q.add_argument("--network", help="network label for the registry endpoint")
+    q.set_defaults(func=_cmd_fx_connect)
+
+    q = fx_sub.add_parser("status", help="list the server's connection endpoints")
+    q.add_argument("url", metavar="OPC_TCP_URL")
+    q.add_argument("--component", help="AutomationComponent name (default: discover)")
+    q.set_defaults(func=_cmd_fx_status)
+
+    q = fx_sub.add_parser("close", help="close a connection by id")
+    q.add_argument("url", metavar="OPC_TCP_URL")
+    q.add_argument("connection_id")
+    q.add_argument("--component", help="AutomationComponent name (default: discover)")
+    q.set_defaults(func=_cmd_fx_close)
 
     p = sub.add_parser("register", help="register a publication without publishing "
                                         "(e.g. for a supernova server)")
