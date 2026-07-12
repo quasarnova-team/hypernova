@@ -92,7 +92,7 @@ Tell the registry about it (the server doesn't self-register — an operator
 or deployment script does, once):
 
 ```bash
-hypernova register atlas/dcs/my-server/env \
+hypernova register site/area1/my-server/env \
     --address opc.udp://239.10.0.9:14842 \
     --publisher-id 42 --writer-group-id 100 --dataset-writer-id 1 \
     --field temperature=DOUBLE

@@ -6,7 +6,7 @@ Dependency-free (JDK 11+), one package, four classes:
 |---|---|
 | `Wire` | UADP codec — the exact profile of the Python client and supernova's C++ engine, held **byte-identical** to both by the shared C++-generated golden vectors (`GoldenTest`). Scalars, 1-D arrays, DataValue quality+timestamps, HMAC-SHA256 signature verify/sign |
 | `Registry` | Name lookup over the registry REST API, with comma-separated primary/secondary failover |
-| `Subscriber` | `Subscriber.byName(registry, "atlas/dcs/...", network)` → blocking `take(timeout)` of name-resolved updates |
+| `Subscriber` | `Subscriber.byName(registry, "site/area1/...", network)` → blocking `take(timeout)` of name-resolved updates |
 | `Publisher` | Send datasets (Part 14 UADP) with per-field quality and source time |
 
 ## Use
@@ -19,7 +19,7 @@ javac --release 11 -d build $(find src/main -name "*.java")
 
 ```java
 try (Subscriber sub = Subscriber.byName("http://registry:4850",
-                                        "atlas/dcs/atca/crate1/env", null)) {
+                                        "site/area1/pump7/env", null)) {
     while (true) {
         Subscriber.Update update = sub.take(5000);
         Wire.FieldValue temperature = update.values.get("temperature");

@@ -1,5 +1,5 @@
 <h1 align="center">hypernova</h1>
-<p align="center"><strong>The next era of DIP</strong> — publish/subscribe data interchange for control systems,<br>built on OPC UA Pub/Sub (Part 14).</p>
+<p align="center"><strong>DIP's proven shape, rebuilt on the industry standard</strong> — publish/subscribe<br>data interchange for control systems, on OPC UA Pub/Sub (Part 14).</p>
 
 <p align="center">
   <a href="https://github.com/quasarnova-team/hypernova/actions/workflows/ci.yml"><img src="https://github.com/quasarnova-team/hypernova/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -11,9 +11,12 @@
 
 ---
 
-CERN's DIP proved the shape: named publications, a name server, subscribe by
-name, values with quality and timestamp — 55,000+ publications strong.
-**hypernova keeps the shape and replaces the substance with the industry
+> **Status: first release — v0.1.0, early.** Every claim below links to its
+> evidence; hardening continues in the open.
+
+hypernova is inspired by the shape that CERN's DIP proved at scale: named
+publications, a name server, subscribe by name, values with quality and
+timestamp. **It keeps that shape and replaces the substance with the industry
 standard.** Publications are OPC UA Part 14 datasets over UDP, readable by
 any Part 14 implementation, and every
 [quasar](https://github.com/quasar-team/quasar)/[supernova](https://github.com/quasarnova-team/supernova)
@@ -22,14 +25,14 @@ OPC UA server is already a native publisher with five lines of config.
 <p align="center"><img src="doc/images/browser.png" width="880" alt="The hypernova registry browser: a live namespace tree and an instrument-style stream pane"></p>
 <p align="center"><em>The registry browser — DIP's browser, remade: a live namespace tree (with per-branch rollup state)
 and an instrument pane for the selected stream — values, quality, rate, and a per-field sparkline,
-fed by a real supernova C++ server at 10 Hz. Deep-linkable, dark/light, zero dependencies.</em></p>
+fed by a real supernova C++ server at 10 Hz (synthetic demo namespaces). Deep-linkable, dark/light, zero dependencies.</em></p>
 
 ## Five lines, either direction
 
 ```python
 from hypernova import Subscriber
 
-with Subscriber("atlas/dcs/atca/crate1/env") as sub:
+with Subscriber("site/area1/pump7/env") as sub:
     for update in sub.updates():
         t = update.values["temperature"]
         print(t.value, "good" if t.is_good else hex(t.status), t.source_datetime)
@@ -38,7 +41,7 @@ with Subscriber("atlas/dcs/atca/crate1/env") as sub:
 ```python
 from hypernova import Publisher
 
-with Publisher("atlas/dcs/demo/env",
+with Publisher("site/area1/demo/env",
                fields={"temperature": "DOUBLE", "counts": "INT32[]"},
                address="opc.udp://239.10.0.1:14840",
                publisher_id=42, writer_group_id=100, dataset_writer_id=1) as pub:
@@ -49,7 +52,7 @@ The same, from **Java** ([clients/java](clients/java) — dependency-free, JDK 1
 
 ```java
 try (Subscriber sub = Subscriber.byName("http://registry:4850",
-                                        "atlas/dcs/atca/crate1/env", null)) {
+                                        "site/area1/pump7/env", null)) {
     Subscriber.Update update = sub.take(5000);
     System.out.println(update.values.get("temperature").value);
 }
@@ -66,7 +69,7 @@ element in its config.xml
 | `hypernova registry` | The phonebook that listens: lookups, collision refusal, leases, per-network endpoints, primary/secondary failover, Prometheus `/metrics` — and the **live namespace browser** above (tree navigation, per-field sparklines, quality, copy-paste subscribers). Advisory by design: data flows without it. |
 | `hypernova` / Java client | Publish & subscribe by name; per-field OPC UA status + source timestamp; scalars and arrays; coordinate caching (registry-down resilient). |
 | `hypernova relay` | The firewall exception as a process: joins streams on one network, re-emits to explicit targets on another. One auditable config per boundary — and it can **sign at the boundary** (below). |
-| `hypernova bridge-opcua` | Serves publications as a classic OPC UA server — **WinCC OA consumes hypernova streams today**, no Part 14 needed. |
+| `hypernova bridge-opcua` | Serves publications as a classic OPC UA server, so any OPC UA client — including commercial SCADA tools — can consume streams without Part 14 support. |
 | `hypernova bridge-dip` | The migration path: republish existing DIP publications as hypernova streams; consumers move one at a time, publishers untouched. |
 | `hypernova sub/pub/browse/register` | The CLI for humans and scripts. |
 
@@ -92,7 +95,7 @@ limits: [doc/security.md](doc/security.md).
 - **Soaked**: multi-publisher signed+unsigned soak across the 16-bit
   sequence wrap with zero loss, flat memory and flat file descriptors
   ([tests/soak/](tests/soak/), results in [QUALITY.md](QUALITY.md)).
-- **Adversarially reviewed, twice** — every finding fixed and
+- **Internally adversarially reviewed, twice** — every finding fixed and
   regression-locked ([QUALITY.md](QUALITY.md)).
 - The full two-network DIP-replacement topology — C++ field server,
   registry, relay pinhole, remote consumer — runs self-verified with one
@@ -102,17 +105,24 @@ limits: [doc/security.md](doc/security.md).
 
 ```bash
 pip install "hypernova[bridge] @ git+https://github.com/quasarnova-team/hypernova"
-# (PyPI's "hypernova" is an unrelated package — install from git or ghcr)
-docker run --rm -p 4850:4850 ghcr.io/quasarnova-team/hypernova registry
+# (PyPI's "hypernova" is an unrelated package — install from git)
 ```
 
 Ten-minute tour: [doc/quickstart.md](doc/quickstart.md) · API:
 [doc/api.md](doc/api.md) · deploying across real network boundaries (+
 systemd units in [deploy/](deploy/)): [doc/deployment.md](doc/deployment.md)
 
+## Heritage
+
+hypernova's publish/subscribe shape is inspired by DIP, the Data Interchange
+Protocol developed at CERN, where it has interconnected control systems for two
+decades. quasarnova is an independent project and is not affiliated with or
+endorsed by CERN; hypernova shares no code with DIP — the wire format is
+standard OPC UA Pub/Sub (Part 14).
+
 ## Reading
 
-- [VISION.md](VISION.md) — why DIP's next era looks like this
+- [VISION.md](VISION.md) — the vision: where this is going
 - [ARCHITECTURE.md](ARCHITECTURE.md) — components, flows, failure model
 - [DIP-PARITY.md](DIP-PARITY.md) — the zero-gap matrix against DIP
 - [doc/security.md](doc/security.md) — the signing profile and its limits
