@@ -1,0 +1,15 @@
+# /etc/systemd/system/hypernova-relay.service
+[Unit]
+Description=hypernova boundary relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hypernova
+ExecStart=/usr/local/bin/hypernova relay /etc/hypernova/relay.json
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,16 @@
+# /etc/systemd/system/hypernova-registry.service
+[Unit]
+Description=hypernova registry (phonebook + live browser)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hypernova
+WorkingDirectory=/var/lib/hypernova
+ExecStart=/usr/local/bin/hypernova registry --port 4850 --store /var/lib/hypernova/registry.json
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
