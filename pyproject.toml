@@ -1,0 +1,46 @@
+[project]
+name = "hypernova"
+version = "0.1.0"
+description = "The next era of DIP — publish/subscribe data interchange for control systems on OPC UA Pub/Sub (Part 14): registry, live browser, Python clients, boundary relay."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "BSD-2-Clause"
+authors = [{ name = "The quasarnova team" }]
+keywords = ["opcua", "opc-ua", "pubsub", "dip", "scada", "cern", "uadp", "quasar"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Manufacturing",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: System :: Networking",
+    "Topic :: Scientific/Engineering",
+]
+dependencies = [
+    "aiohttp>=3.9",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.24"]
+
+[project.scripts]
+hypernova = "hypernova.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/quasarnova-team/hypernova"
+Documentation = "https://github.com/quasarnova-team/hypernova/tree/master/doc"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["hypernova"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
