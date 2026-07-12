@@ -82,7 +82,9 @@ def _registry_call(method: str, url: str, payload: dict | None = None) -> dict:
 
 
 def _cache_path(name: str) -> Path:
-    return _CACHE_DIR / (name.replace("/", "__") + ".json")
+    import re
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "__", name)
+    return _CACHE_DIR / (safe + ".json")
 
 
 @dataclass
@@ -304,7 +306,7 @@ class Publisher:
                 raise ValueError(f"field {field_name!r} expects {expected}, got {value!r}")
         stamp = datetime_to_opc(_timestamp or datetime.now(timezone.utc))
         statuses = _status or {}
-        self._sequence = (self._sequence + 1) & 0xFFFF or 1
+        self._sequence = (self._sequence + 1) & 0xFFFF
         dsm = DataSetMessage(
             dataset_writer_id=self._dataset_writer_id,
             sequence_number=self._sequence,

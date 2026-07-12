@@ -58,23 +58,35 @@ class Listener:
         self._transports: dict[tuple[str, int], object] = {}
         self._live: dict[str, LiveState] = {}
         self.undecodable_datagrams = 0
+        self.endpoint_errors: dict[str, str] = {}
 
     def live(self, name: str) -> LiveState:
         return self._live.setdefault(name, LiveState())
 
     async def sync(self) -> None:
-        """(Re)open receivers so every registered endpoint is being heard."""
+        """(Re)open receivers so every registered endpoint is being heard.
+        One endpoint failing to bind (port clash with a local subscriber,
+        privileged port, unparsable address from an old store) never affects
+        the others or the service — the failure is recorded and surfaced."""
         wanted: dict[tuple[str, int], None] = {}
+        self.endpoint_errors.clear()
         for publication in self._store.list():
-            wanted[transport.parse_address(publication.address)] = None
+            try:
+                wanted[transport.parse_address(publication.address)] = None
+            except ValueError as error:
+                self.endpoint_errors[publication.address] = str(error)
         for endpoint in list(self._transports):
             if endpoint not in wanted:
                 self._transports.pop(endpoint).close()
         for (host, port) in wanted:
             if (host, port) in self._transports:
                 continue
-            receiver = await transport.create_receiver(
-                host, port, lambda data, addr: self._on_datagram(data))
+            try:
+                receiver = await transport.create_receiver(
+                    host, port, lambda data, addr: self._on_datagram(data))
+            except (OSError, ValueError) as error:
+                self.endpoint_errors[f"{host}:{port}"] = str(error)
+                continue
             self._transports[(host, port)] = receiver
 
     def close(self) -> None:

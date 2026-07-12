@@ -13,11 +13,27 @@ __all__ = ["parse_address", "open_receive_socket", "open_send_socket", "Datagram
 
 
 def parse_address(address: str) -> tuple[str, int]:
-    """'opc.udp://239.0.0.5:4840' -> ('239.0.0.5', 4840)."""
-    parsed = urlparse(address)
-    if parsed.scheme != "opc.udp" or not parsed.hostname or not parsed.port:
+    """'opc.udp://239.0.0.5:4840' -> ('239.0.0.5', 4840). IPv4 (or a DNS name
+    resolving to IPv4) only — IPv6 is not supported in this version."""
+    try:
+        parsed = urlparse(address)
+        hostname, port = parsed.hostname, parsed.port
+    except ValueError as error:
+        raise ValueError(f"invalid address {address!r}: {error}") from None
+    if parsed.scheme != "opc.udp" or not hostname or not port:
         raise ValueError(f"invalid address {address!r}: expected opc.udp://host:port")
-    return parsed.hostname, parsed.port
+    if ":" in hostname:
+        raise ValueError(f"invalid address {address!r}: IPv6 is not supported yet")
+    return hostname, port
+
+
+def _interface_bytes(interface: str) -> bytes:
+    try:
+        return socket.inet_aton(interface)
+    except OSError:
+        raise ValueError(
+            f"interface {interface!r} must be a local IPv4 address "
+            "(e.g. 127.0.0.1 or the address of the NIC to use)") from None
 
 
 def _is_multicast(host: str) -> bool:
@@ -44,7 +60,7 @@ def open_receive_socket(host: str, port: int, *, interface: str = "0.0.0.0") -> 
             pass
     sock.bind(("", port))
     if multicast:
-        membership = struct.pack("4s4s", socket.inet_aton(host), socket.inet_aton(interface))
+        membership = struct.pack("4s4s", socket.inet_aton(host), _interface_bytes(interface))
         sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, membership)
     sock.setblocking(False)
     return sock
@@ -60,7 +76,7 @@ def open_send_socket(host: str, *, ttl: int = 1, loopback: bool = True,
         sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1 if loopback else 0)
         if interface:
             sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF,
-                            socket.inet_aton(interface))
+                            _interface_bytes(interface))
     sock.setblocking(False)
     return sock
 

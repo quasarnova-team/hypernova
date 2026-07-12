@@ -147,17 +147,28 @@ _VARIANT_ARRAY_DIMENSIONS = 0x40
 _VARIANT_ARRAY_VALUES = 0x80
 
 
+_UNIX_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+_MAX_UNIX_SECONDS = 253402300799  # 9999-12-31T23:59:59Z
+
+
 def datetime_to_opc(moment: datetime) -> int:
-    """UTC datetime -> OPC UA DateTime (100 ns ticks since 1601-01-01)."""
+    """UTC datetime -> OPC UA DateTime (100 ns ticks since 1601-01-01).
+    Integer timedelta arithmetic: exact to the tick, no float quantization."""
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=timezone.utc)
-    return int(moment.timestamp() * 10_000_000) + _OPC_EPOCH_OFFSET_100NS
+    delta = moment - _UNIX_EPOCH
+    ticks = (delta.days * 864_000_000_000
+             + delta.seconds * 10_000_000
+             + delta.microseconds * 10)
+    return ticks + _OPC_EPOCH_OFFSET_100NS
 
 
 def opc_to_datetime(ticks: int) -> datetime:
-    """OPC UA DateTime -> UTC datetime (clamped to the unix-representable range)."""
+    """OPC UA DateTime -> UTC datetime, clamped at both ends so arbitrary
+    (including hostile) tick values can never raise."""
     seconds = (ticks - _OPC_EPOCH_OFFSET_100NS) / 10_000_000
-    return datetime.fromtimestamp(max(seconds, 0.0), tz=timezone.utc)
+    return datetime.fromtimestamp(min(max(seconds, 0.0), _MAX_UNIX_SECONDS),
+                                  tz=timezone.utc)
 
 
 @dataclass

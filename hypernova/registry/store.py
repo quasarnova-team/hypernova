@@ -8,9 +8,10 @@ import json
 import os
 import re
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields as dataclass_fields
 from pathlib import Path
 
+from hypernova import transport
 from hypernova.wire import BuiltinType, PublisherIdType
 
 _NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$")
@@ -21,6 +22,17 @@ DEFAULT_LEASE_SECONDS = 600.0
 
 class StoreError(ValueError):
     """Invalid registration or collision; message says exactly what and why."""
+
+
+def _validate_address(address: str) -> None:
+    if not _ADDRESS_RE.match(address):
+        raise StoreError(f"invalid address {address!r}: expected opc.udp://host:port")
+    try:
+        _, port = transport.parse_address(address)
+    except ValueError as error:
+        raise StoreError(str(error)) from None
+    if not 1 <= port <= 65535:
+        raise StoreError(f"invalid address {address!r}: port out of range 1-65535")
 
 
 @dataclass
@@ -73,8 +85,10 @@ class Publication:
 
     @classmethod
     def from_json(cls, data: dict) -> "Publication":
-        fields = [FieldSpec(**f) for f in data.pop("fields")]
-        return cls(fields=fields, **data)
+        known = {f.name for f in dataclass_fields(cls)} - {"fields"}
+        fields = [FieldSpec(name=f["name"], type=f["type"]) for f in data["fields"]]
+        kwargs = {k: v for k, v in data.items() if k in known}
+        return cls(fields=fields, **kwargs)
 
 
 def _validate(publication: Publication) -> None:
@@ -82,12 +96,12 @@ def _validate(publication: Publication) -> None:
         raise StoreError(
             f"invalid publication name {publication.name!r}: use slash-separated "
             "segments of letters, digits, '_', '.', '-'")
-    if not _ADDRESS_RE.match(publication.address):
-        raise StoreError(
-            f"invalid address {publication.address!r}: expected opc.udp://host:port")
+    _validate_address(publication.address)
     for network, address in publication.endpoints.items():
-        if not _ADDRESS_RE.match(address):
-            raise StoreError(f"invalid endpoint for network {network!r}: {address!r}")
+        try:
+            _validate_address(address)
+        except StoreError as error:
+            raise StoreError(f"endpoint for network {network!r}: {error}") from None
     if not 0 <= publication.publisher_id <= 0xFFFFFFFFFFFFFFFF:
         raise StoreError("publisher_id out of range")
     if not 0 <= publication.writer_group_id <= 0xFFFF:
@@ -121,10 +135,18 @@ class Store:
     def __init__(self, path: Path | str | None = None) -> None:
         self._path = Path(path) if path else None
         self._by_name: dict[str, Publication] = {}
+        self.load_error: str | None = None
         if self._path and self._path.exists():
-            for data in json.loads(self._path.read_text()):
-                publication = Publication.from_json(data)
-                self._by_name[publication.name] = publication
+            try:
+                for data in json.loads(self._path.read_text()):
+                    publication = Publication.from_json(data)
+                    self._by_name[publication.name] = publication
+            except (ValueError, TypeError, KeyError) as error:
+                quarantine = self._path.with_suffix(self._path.suffix + ".corrupt")
+                os.replace(self._path, quarantine)
+                self._by_name.clear()
+                self.load_error = (f"could not load {self._path}: {error} — "
+                                   f"file preserved as {quarantine}, starting empty")
 
     def __len__(self) -> int:
         return len(self._by_name)

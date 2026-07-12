@@ -18,11 +18,19 @@ from hypernova.wire import BuiltinType
 _STALE_AFTER_SECONDS = 10.0
 
 
+def _json_safe(value):
+    if isinstance(value, float) and (value != value or value in (float("inf"), float("-inf"))):
+        return repr(value)
+    if isinstance(value, list):
+        return [_json_safe(element) for element in value]
+    return value
+
+
 def _field_json(name: str, value) -> dict:
     return {
         "name": name,
         "type": value.type.name,
-        "value": value.value,
+        "value": _json_safe(value.value),
         "status": f"0x{value.status:08X}",
         "good": value.is_good,
         "sourceTime": value.source_datetime.isoformat() if value.source_datetime else None,
@@ -105,12 +113,16 @@ def create_app(store: Store, *, listen: bool = True) -> web.Application:
 
     @routes.get("/api/health")
     async def health(request):
-        return web.json_response({
+        payload = {
             "service": "hypernova-registry",
             "version": __version__,
             "publications": len(store),
             "undecodableDatagrams": listener.undecodable_datagrams,
-        })
+            "endpointErrors": listener.endpoint_errors,
+        }
+        if store.load_error:
+            payload["storeLoadError"] = store.load_error
+        return web.json_response(payload)
 
     @routes.get("/api/types")
     async def types(request):
@@ -133,7 +145,14 @@ def create_app(store: Store, *, listen: bool = True) -> web.Application:
     async def register(request):
         name = request.match_info["name"]
         try:
-            data = await request.json()
+            try:
+                data = await request.json()
+            except ValueError:
+                return web.json_response({"error": "request body is not valid JSON"},
+                                         status=400)
+            if not isinstance(data, dict):
+                return web.json_response({"error": "request body must be a JSON object"},
+                                         status=400)
             publication = _publication_from_json(name, data)
             store.register(publication, replace=bool(data.get("replace", False)))
         except StoreError as error:
