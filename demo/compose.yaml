@@ -1,0 +1,66 @@
+# The DIP-replacement topology, miniaturized:
+#
+#   atcn (technical network)          gpn (general network)
+#   ┌──────────────────────┐          ┌─────────────────────┐
+#   │ field-server (C++)   │          │ consumer            │
+#   │  supernova, UASDK    │          │  hypernova sub      │
+#   │  multicast 239.0.0.5 │          │  by name, unicast   │
+#   └──────────┬───────────┘          └──────────▲──────────┘
+#              │            relay (pinhole)      │
+#              └───────────► joins atcn ─────────┘
+#                            re-emits to gpn
+#   registry+browser: feet in both networks, listens on atcn,
+#   serves lookups per network, web UI on http://localhost:4850
+#
+# Start with demo/run_demo.sh (it builds the image, registers the
+# publication and verifies data end to end).
+
+networks:
+  atcn:
+    ipam:
+      config: [{subnet: "172.28.0.0/24"}]
+  gpn:
+    ipam:
+      config: [{subnet: "172.29.0.0/24"}]
+
+services:
+  field-server:
+    image: ghcr.io/quasar-team/quasar-uasdk:latest
+    platform: linux/amd64
+    volumes:
+      - ${SUPERNOVA_TREE:?point SUPERNOVA_TREE at a built supernova publisher tree}:/cell/supernova
+    working_dir: /cell/supernova/build/bin
+    command: ./OpcUaServer
+    networks: [atcn]
+
+  registry:
+    image: hypernova:demo
+    build:
+      context: ..
+      dockerfile: demo/Dockerfile
+    command: ["registry", "--store", ""]
+    networks: [atcn, gpn]
+    ports:
+      - "4850:4850"
+
+  relay:
+    image: hypernova:demo
+    command: ["relay", "/config/relay.json"]
+    volumes:
+      - ./relay.json:/config/relay.json:ro
+    networks:
+      atcn: {}
+      gpn: {}
+    ports:
+      - "4860:4860"
+
+  consumer:
+    image: hypernova:demo
+    command: ["sub", "atlas/dcs/demo/env",
+              "--registry", "http://registry:4850",
+              "--network", "gpn", "--timeout", "3600"]
+    restart: on-failure
+    networks:
+      gpn:
+        ipv4_address: 172.29.0.20
+    depends_on: [registry]

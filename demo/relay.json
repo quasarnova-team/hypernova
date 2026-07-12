@@ -1,0 +1,11 @@
+{
+  "routes": [
+    {
+      "name": "atlas/dcs/demo/env",
+      "from": "opc.udp://239.0.0.5:4840",
+      "to": ["opc.udp://172.29.0.20:24840"],
+      "ttl": 1
+    }
+  ],
+  "health_port": 4860
+}

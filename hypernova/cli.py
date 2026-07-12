@@ -107,15 +107,25 @@ def _cmd_pub(args) -> int:
 
 
 def _cmd_sub(args) -> int:
-    from hypernova.client import Subscriber
-    with Subscriber(args.name, registry=args.registry, network=args.network) as subscriber:
+    from hypernova.client import RegistryError, Subscriber
+    deadline = time.time() + args.timeout
+    while True:
+        try:
+            subscriber = Subscriber(args.name, registry=args.registry, network=args.network)
+            break
+        except RegistryError as error:
+            if time.time() >= deadline:
+                raise
+            print(f"waiting for {args.name!r} ({error})", file=sys.stderr)
+            time.sleep(2)
+    with subscriber:
         received = 0
         for update in subscriber.updates(timeout=args.timeout):
             fields = "  ".join(
                 f"{name}={fv.value!r}{'' if fv.is_good else ' (BAD)'}"
                 for name, fv in update.values.items())
             stamp = time.strftime("%H:%M:%S", time.localtime(update.received_at))
-            print(f"{stamp}  {update.name}  seq={update.sequence_number}  {fields}")
+            print(f"{stamp}  {update.name}  seq={update.sequence_number}  {fields}", flush=True)
             received += 1
             if args.count and received >= args.count:
                 break
