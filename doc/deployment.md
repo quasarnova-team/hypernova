@@ -25,7 +25,10 @@ field servers ──multicast──► local            consumers, by name
    (`GET :4860/api/health` shows every route with live counters).
 3. **The registry is HTTP on one port** — the only thing that needs to be
    reachable from everywhere, like the DIP name server today. It is advisory:
-   its outage stops browsing and *first-ever* lookups, never data.
+   its outage stops browsing and *first-ever* lookups, never data. For
+   DIP-style redundancy run two and set
+   `HYPERNOVA_REGISTRY=http://reg1:4850,http://reg2:4850` — publishers
+   register with both, lookups fail over in order.
 4. **Register per-network endpoints** so lookup answers depend on where the
    subscriber sits:
 

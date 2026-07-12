@@ -133,7 +133,8 @@ function render() {
     const live = p.live.stale
       ? '<span class="badge stale">stale' + (p.live.ageSeconds != null ? " " + Math.round(p.live.ageSeconds) + "s" : "") + "</span>"
       : '<span class="badge live">live</span>';
-    const lease = p.leaseExpired ? '<span class="badge lease">lease expired</span>' : "";
+    const lease = (p.leaseExpired && p.live.stale)
+      ? '<span class="badge lease">lease expired</span>' : "";
     html += `<tr class="pub" data-name="${esc(p.name)}">
       <td class="name">${esc(p.name)}</td>
       <td>${p.fields.map(f => esc(f.name)).join(", ")}</td>

@@ -54,7 +54,14 @@ _CACHE_DIR = Path(os.environ.get("HYPERNOVA_CACHE",
 
 
 def default_registry_url() -> str:
+    """One URL, or several comma-separated (DIP-style primary/secondary):
+    lookups fail over in order; publishers register with every one."""
     return os.environ.get("HYPERNOVA_REGISTRY", "http://localhost:4850")
+
+
+def _registry_urls(registry: str | None) -> list[str]:
+    return [u.strip().rstrip("/") for u in (registry or default_registry_url()).split(",")
+            if u.strip()]
 
 
 class RegistryError(RuntimeError):
@@ -115,7 +122,7 @@ class Subscriber:
         interface: str | None = None,
     ) -> None:
         self.name = name
-        self._registry = registry or default_registry_url()
+        self._registries = _registry_urls(registry)
         self._network = network
         self._interface = interface or os.environ.get("HYPERNOVA_INTERFACE") or "0.0.0.0"
         if address is not None:
@@ -134,21 +141,24 @@ class Subscriber:
         self.undecodable_datagrams = 0
 
     def _lookup(self) -> dict:
-        url = f"{self._registry}/api/lookup/{self.name}"
-        if self._network:
-            url += f"?network={self._network}"
-        try:
-            coords = _registry_call("GET", url)
-            _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-            _cache_path(self.name).write_text(json.dumps(coords))
-            return coords
-        except RegistryError as error:
-            cached = _cache_path(self.name)
-            if cached.exists():
-                return json.loads(cached.read_text())
-            raise RegistryError(
-                f"{error} — and no cached coordinates for {self.name!r}; "
-                "pass explicit address/ids to subscribe registry-free") from None
+        last_error: RegistryError | None = None
+        for registry in self._registries:
+            url = f"{registry}/api/lookup/{self.name}"
+            if self._network:
+                url += f"?network={self._network}"
+            try:
+                coords = _registry_call("GET", url)
+                _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+                _cache_path(self.name).write_text(json.dumps(coords))
+                return coords
+            except RegistryError as error:
+                last_error = error
+        cached = _cache_path(self.name)
+        if cached.exists():
+            return json.loads(cached.read_text())
+        raise RegistryError(
+            f"{last_error} — and no cached coordinates for {self.name!r}; "
+            "pass explicit address/ids to subscribe registry-free") from None
 
     def start(self) -> "Subscriber":
         host, port = transport.parse_address(self._coords["address"])
@@ -262,7 +272,7 @@ class Publisher:
         self._publisher_id_type = PublisherIdType[publisher_id_type]
         self._writer_group_id = writer_group_id
         self._dataset_writer_id = dataset_writer_id
-        self._registry = registry or default_registry_url()
+        self._registries = _registry_urls(registry)
         self._sequence = 0
         self.registered = False
         host, port = transport.parse_address(address)
@@ -270,24 +280,30 @@ class Publisher:
         self._socket = transport.open_send_socket(
             host, ttl=ttl, interface=interface or os.environ.get("HYPERNOVA_INTERFACE"))
         if register:
-            try:
-                _registry_call("PUT", f"{self._registry}/api/publications/{name}", {
-                    "address": address,
-                    "publisherId": publisher_id,
-                    "publisherIdType": publisher_id_type,
-                    "writerGroupId": writer_group_id,
-                    "dataSetWriterId": dataset_writer_id,
-                    "description": description,
-                    "endpoints": endpoints or {},
-                    "fields": [{"name": n, "type": t} for n, t in fields.items()],
-                    "replace": True,
-                })
-                self.registered = True
-            except RegistryError:
-                self.registered = False
+            payload = {
+                "address": address,
+                "publisherId": publisher_id,
+                "publisherIdType": publisher_id_type,
+                "writerGroupId": writer_group_id,
+                "dataSetWriterId": dataset_writer_id,
+                "description": description,
+                "endpoints": endpoints or {},
+                "fields": [{"name": n, "type": t} for n, t in fields.items()],
+                "replace": True,
+            }
+            for registry in self._registries:
+                try:
+                    _registry_call("PUT", f"{registry}/api/publications/{name}", payload)
+                    self.registered = True
+                except RegistryError:
+                    pass
 
     def renew(self) -> None:
-        _registry_call("POST", f"{self._registry}/api/publications/{self.name}/renew")
+        for registry in self._registries:
+            try:
+                _registry_call("POST", f"{registry}/api/publications/{self.name}/renew")
+            except RegistryError:
+                pass
 
     def send(self, *, _status: dict[str, int] | None = None,
              _timestamp: datetime | None = None, **values) -> None:

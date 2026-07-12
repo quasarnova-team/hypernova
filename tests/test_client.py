@@ -127,3 +127,16 @@ async def test_subscriber_filters_foreign_streams(registry_url):
         assert update.values["v"].value == 1
     mine.close()
     foreign.close()
+
+
+async def test_registry_failover_lookup_and_register(registry_url, tmp_path):
+    registries = f"http://127.0.0.1:1,{registry_url}"
+    publisher = await asyncio.to_thread(lambda: Publisher(
+        "fo/pub", fields={"v": "INT32"}, address="opc.udp://239.10.0.77:24863",
+        publisher_id=3, writer_group_id=3, dataset_writer_id=3,
+        registry=registries))
+    assert publisher.registered, "registration must survive one dead registry"
+    publisher.close()
+    subscriber = await asyncio.to_thread(
+        lambda: Subscriber("fo/pub", registry=registries))
+    assert subscriber._coords["address"] == "opc.udp://239.10.0.77:24863"

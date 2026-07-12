@@ -19,7 +19,7 @@ the capability exists with strictly more than DIP provides.
 | Java API | No native client yet. Path: [Eclipse Milo](https://github.com/eclipse-milo/milo) (Java Part 14 stack) + the registry's plain REST lookup | 🟡 roadmap |
 | Cross-domain reachability (TN↔GPN) | Relay pinholes (explicit, auditable, per-stream) or plain unicast UADP through a firewall rule — DIP's own model | ✅ |
 | Publication liveness | Leases + continuous listening: the browser shows stale/lost/rate, which DIPNS never knew | ✅ better |
-| Name-server redundancy | Single registry in v0.1. Mitigations: data flows without it, subscribers cache coordinates, state is one JSON file (trivially replicated); active redundancy is a v1 item | 🟡 roadmap |
+| Name-server redundancy | DIP-style primary/secondary: `HYPERNOVA_REGISTRY` takes comma-separated registries — lookups fail over in order, publishers register with every one; plus data flows with no registry at all and subscribers cache coordinates | ✅ |
 | Smoothing | Not offered — DIP doesn't offer it either | ➖ parity |
 | Access control / archiving | Not offered — DIP doesn't offer them either; Part 14 message signing is the v1 hardening item | ➖ parity |
 

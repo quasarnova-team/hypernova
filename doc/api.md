@@ -9,7 +9,9 @@ Subscriber(name, *, registry=None, network=None,
 ```
 
 Resolve `name` at the registry (`registry` URL, default
-`$HYPERNOVA_REGISTRY` or `http://localhost:4850`) and receive its stream.
+`$HYPERNOVA_REGISTRY` or `http://localhost:4850`; several comma-separated
+URLs give DIP-style primary/secondary failover — lookups try them in order,
+publishers register with every one) and receive its stream.
 `network` asks the registry for that network's endpoint (relayed copies).
 Passing `address` + ids skips the registry entirely. Successful lookups are
 cached under `~/.cache/hypernova/` (override with `$HYPERNOVA_CACHE`), so a
