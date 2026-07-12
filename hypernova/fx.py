@@ -199,52 +199,74 @@ async def connect_pair(*, publisher_url: str, publisher_component: str | None,
                        register: str | None = None, register_as: str | None = None,
                        network: str | None = None) -> dict:
     """The FX ConnectionManager happy path: publisher first, then the
-    subscriber with the publisher's coordinates as peer."""
+    subscriber with the publisher's coordinates as peer.
+
+    Once the publisher side is up, EVERY later failure — missing or malformed
+    coordinates from the server, the subscriber refusing, a registry error —
+    rolls the publisher side back, so a failed connect never leaves a live
+    half-connection behind (which would also hold a server endpoint slot)."""
     pub_id, pub_detail = await establish(
         publisher_url, component=publisher_component, entity=publisher_entity,
         role="publisher", dataset=publisher_dataset, address=address,
         interval=interval, name=name, ttl=ttl)
-    coordinates = pub_detail.get("coordinates")
-    if not coordinates:
-        raise SystemExit("publisher side established but returned no coordinates — "
-                         "is the server a supernova with FX?")
+
+    sub_id = None
+
+    async def _rollback(reason: str):
+        logger.warning("%s; rolling back the connection", reason)
+        if sub_id is not None:
+            try:
+                await close(subscriber_url, component=subscriber_component, connection_id=sub_id)
+            except Exception as undo_error:
+                logger.warning("subscriber rollback failed: %s", undo_error)
+        try:
+            await close(publisher_url, component=publisher_component, connection_id=pub_id)
+        except Exception as undo_error:
+            logger.warning("publisher rollback failed: %s", undo_error)
 
     try:
+        coordinates = pub_detail.get("coordinates")
+        if not isinstance(coordinates, dict):
+            raise SystemExit("publisher side established but returned no coordinates — "
+                             "is the server a supernova with FX?")
+        try:
+            pub_key = int(coordinates["publisherId"])
+            wg_key = int(coordinates["writerGroupId"])
+            dsw_key = int(coordinates["dataSetWriterId"])
+        except (KeyError, TypeError, ValueError):
+            raise SystemExit(f"publisher returned malformed coordinates: {coordinates!r}")
+
         sub_id, sub_detail = await establish(
             subscriber_url, component=subscriber_component, entity=subscriber_entity,
             role="subscriber", dataset=subscriber_dataset, address=address,
             peer=coordinates, name=name)
-    except Exception:
-        logger.warning("subscriber side failed; closing the publisher side '%s' again", pub_id)
-        try:
-            await close(publisher_url, component=publisher_component, connection_id=pub_id)
-        except Exception as undo_error:
-            logger.warning("undo failed too: %s", undo_error)
-        raise
 
-    result = {
-        "publisher": {"url": publisher_url, "connectionId": pub_id, "detail": pub_detail},
-        "subscriber": {"url": subscriber_url, "connectionId": sub_id, "detail": sub_detail},
-        "address": address,
-        "coordinates": coordinates,
-    }
-
-    if register and register_as:
-        from hypernova.client import _registry_call
-        fields = await _dataset_fields(
-            publisher_url, publisher_component, publisher_entity, publisher_dataset, "OutputData")
-        payload = {
+        result = {
+            "publisher": {"url": publisher_url, "connectionId": pub_id, "detail": pub_detail},
+            "subscriber": {"url": subscriber_url, "connectionId": sub_id, "detail": sub_detail},
             "address": address,
-            "publisherId": int(coordinates["publisherId"]),
-            "publisherIdType": str(coordinates.get("publisherIdType", "UInt16")).upper(),
-            "writerGroupId": int(coordinates["writerGroupId"]),
-            "dataSetWriterId": int(coordinates["dataSetWriterId"]),
-            "description": f"FX connection {pub_id} ({publisher_entity}.{publisher_dataset})",
-            "endpoints": {network: address} if network else {},
-            "fields": [{"name": n, "type": t} for n, t in fields],
-            "replace": True,
+            "coordinates": coordinates,
         }
-        _registry_call("PUT", f"{register}/api/publications/{register_as}", payload)
-        result["registered"] = register_as
+
+        if register and register_as:
+            from hypernova.client import _registry_call
+            fields = await _dataset_fields(
+                publisher_url, publisher_component, publisher_entity, publisher_dataset, "OutputData")
+            payload = {
+                "address": address,
+                "publisherId": pub_key,
+                "publisherIdType": str(coordinates.get("publisherIdType", "UInt16")).upper(),
+                "writerGroupId": wg_key,
+                "dataSetWriterId": dsw_key,
+                "description": f"FX connection {pub_id} ({publisher_entity}.{publisher_dataset})",
+                "endpoints": {network: address} if network else {},
+                "fields": [{"name": n, "type": t} for n, t in fields],
+                "replace": True,
+            }
+            _registry_call("PUT", f"{register}/api/publications/{register_as}", payload)
+            result["registered"] = register_as
+    except BaseException as error:
+        await _rollback(f"connect failed after publisher established ({error})")
+        raise
 
     return result

@@ -88,11 +88,17 @@ async def test_connect_pair_rolls_back_publisher_when_subscriber_fails(monkeypat
 
 
 async def test_connect_pair_refuses_publisher_without_coordinates(monkeypatch):
+    closed = []
+
     async def fake_establish(url, *, component, entity, role, dataset, address,
                              interval=None, peer=None, name=None, ttl=None):
-        return "cep-1", {"status": "Operational"}
+        return "cep-1", {"status": "Operational"}  # no coordinates
+
+    async def fake_close(url, *, component, connection_id):
+        closed.append((url, connection_id))
 
     monkeypatch.setattr(fx, "establish", fake_establish)
+    monkeypatch.setattr(fx, "close", fake_close)
 
     with pytest.raises(SystemExit, match="no coordinates"):
         await fx.connect_pair(
@@ -101,3 +107,71 @@ async def test_connect_pair_refuses_publisher_without_coordinates(monkeypatch):
             subscriber_url="opc.tcp://b:4841", subscriber_component="CellB",
             subscriber_entity="control", subscriber_dataset="mirror",
             address="opc.udp://239.192.0.31:14860")
+
+    # the publisher was already up — it must be rolled back, not orphaned
+    assert closed == [("opc.tcp://a:4841", "cep-1")]
+
+
+async def test_connect_pair_rejects_malformed_coordinates_and_rolls_back(monkeypatch):
+    closed = []
+
+    async def fake_establish(url, *, component, entity, role, dataset, address,
+                             interval=None, peer=None, name=None, ttl=None):
+        return "cep-1", {"status": "Operational",
+                         "coordinates": {"publisherId": "not-a-number",
+                                         "writerGroupId": 200, "dataSetWriterId": 1}}
+
+    async def fake_close(url, *, component, connection_id):
+        closed.append((url, connection_id))
+
+    monkeypatch.setattr(fx, "establish", fake_establish)
+    monkeypatch.setattr(fx, "close", fake_close)
+
+    with pytest.raises(SystemExit, match="malformed coordinates"):
+        await fx.connect_pair(
+            publisher_url="opc.tcp://a:4841", publisher_component="CellA",
+            publisher_entity="control", publisher_dataset="env",
+            subscriber_url="opc.tcp://b:4841", subscriber_component="CellB",
+            subscriber_entity="control", subscriber_dataset="mirror",
+            address="opc.udp://239.192.0.31:14860")
+
+    assert closed == [("opc.tcp://a:4841", "cep-1")]
+
+
+async def test_connect_pair_rolls_back_both_when_registration_fails(monkeypatch):
+    closed = []
+
+    async def fake_establish(url, *, component, entity, role, dataset, address,
+                             interval=None, peer=None, name=None, ttl=None):
+        if role == "publisher":
+            return "pub-1", {"status": "Operational",
+                             "coordinates": {"publisherId": 91, "writerGroupId": 200,
+                                             "dataSetWriterId": 1}}
+        return "sub-1", {"status": "Operational"}
+
+    async def fake_close(url, *, component, connection_id):
+        closed.append(connection_id)
+
+    async def fake_fields(*a, **k):
+        return [("temperature", "DOUBLE")]
+
+    def boom(*a, **k):
+        raise RuntimeError("registry unreachable")
+
+    monkeypatch.setattr(fx, "establish", fake_establish)
+    monkeypatch.setattr(fx, "close", fake_close)
+    monkeypatch.setattr(fx, "_dataset_fields", fake_fields)
+    import hypernova.client
+    monkeypatch.setattr(hypernova.client, "_registry_call", boom)
+
+    with pytest.raises(RuntimeError, match="registry unreachable"):
+        await fx.connect_pair(
+            publisher_url="opc.tcp://a:4841", publisher_component="CellA",
+            publisher_entity="control", publisher_dataset="env",
+            subscriber_url="opc.tcp://b:4841", subscriber_component="CellB",
+            subscriber_entity="control", subscriber_dataset="mirror",
+            address="opc.udp://239.192.0.31:14860",
+            register="http://reg:4850", register_as="site/area1/env")
+
+    # BOTH sides were live when registration failed — both must be closed
+    assert set(closed) == {"pub-1", "sub-1"}

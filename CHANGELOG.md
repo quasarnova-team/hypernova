@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.1.1 (2026-07-13)
+
+Connection-manager hardening from the FX adversarial review:
+
+- **`fx connect` now rolls both sides back on any post-publisher failure.**
+  Previously, missing or malformed publisher coordinates raised without
+  closing the already-established publisher, and a registry error after both
+  sides were up left both live. Now every failure after the publisher
+  establishes — bad coordinates, subscriber refusal, registry error — closes
+  whatever is live, so a failed connect never orphans a half-connection (or
+  leaks a server endpoint slot).
+- Publisher coordinates are validated (type-checked) before use.
+- 3 new regression tests (missing-coordinates rollback, malformed-coordinates
+  rollback, registration-failure rolls back both) — 89 tests total, green.
+
+Pairs with [supernova 1.2.1](https://github.com/quasarnova-team/supernova/releases/tag/v1.2.1).
+Purely additive/defensive; no API change.
+
 ## 1.1.0 (2026-07-13)
 
 The FX connection manager — hypernova learns OPC UA FX (Parts 80/81):
