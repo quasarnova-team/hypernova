@@ -709,11 +709,29 @@ async def test_api_exposes_fx_in_list_and_detail(tmp_path):
 
 def test_browser_renders_fx_provenance():
     from hypernova.registry.ui import INDEX_HTML
-    # the browser must render the provenance the API now carries
-    assert "fxbar" in INDEX_HTML and "p.fx" in INDEX_HTML   # the provenance bar
+    assert "fxbar" in INDEX_HTML                            # the provenance bar
     assert "FX link" in INDEX_HTML                          # the detail badge
     assert "fxtag" in INDEX_HTML                            # the namespace-tree marker
     assert "isMulticast" in INDEX_HTML                      # the honest unicast note
+    # every provenance field must be escaped — pin the literal esc() call so a
+    # regression dropping it (an XSS hole) fails CI, not just marker-presence
+    for field in ("connection", "publisher.server", "publisher.entity", "publisher.dataset",
+                  "subscriber.server", "subscriber.entity", "subscriber.dataset"):
+        assert f"esc(p.fx.{field})" in INDEX_HTML, f"fx.{field} is rendered unescaped"
+
+
+def test_store_caps_fx_field_length(tmp_path):
+    from hypernova.registry.store import FieldSpec, Publication, Store, StoreError
+    store = Store(tmp_path / "reg.json")
+    oversized = "x" * 300  # > 256 bytes — the surface widened, so close it like description
+    with pytest.raises(StoreError) as excinfo:
+        store.register(Publication(name="cell/z", address="opc.udp://239.0.0.7:14842",
+                                   publisher_id=93, writer_group_id=202, dataset_writer_id=1,
+                                   fields=[FieldSpec("t", "DOUBLE")],
+                                   fx={"connection": oversized,
+                                       "publisher": {"server": "s", "entity": "e", "dataset": "d"},
+                                       "subscriber": {"server": "s", "entity": "e", "dataset": "d"}}))
+    assert "fx.connection" in str(excinfo.value) and "too long" in str(excinfo.value)
 
 
 def test_sanitize_name_truncates_to_bytes_not_characters():

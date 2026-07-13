@@ -139,19 +139,26 @@ def _validate(publication: Publication) -> None:
         _validate_fx(publication.fx)
 
 
+_MAX_FX_FIELD_BYTES = 256
+
+
+def _fx_string(value, field_name: str) -> None:
+    if not isinstance(value, str) or not value:
+        raise StoreError(f"{field_name} must be a non-empty string")
+    if len(value.encode("utf-8")) > _MAX_FX_FIELD_BYTES:
+        raise StoreError(f"{field_name} is too long (max {_MAX_FX_FIELD_BYTES} bytes)")
+
+
 def _validate_fx(fx: dict) -> None:
     if not isinstance(fx, dict):
         raise StoreError("fx provenance must be an object")
-    connection = fx.get("connection")
-    if not isinstance(connection, str) or not connection:
-        raise StoreError("fx.connection must be a non-empty string")
+    _fx_string(fx.get("connection"), "fx.connection")
     for side in ("publisher", "subscriber"):
         endpoint = fx.get(side)
         if not isinstance(endpoint, dict):
             raise StoreError(f"fx.{side} must be an object with server, entity, dataset")
         for key in ("server", "entity", "dataset"):
-            if not isinstance(endpoint.get(key), str) or not endpoint[key]:
-                raise StoreError(f"fx.{side}.{key} must be a non-empty string")
+            _fx_string(endpoint.get(key), f"fx.{side}.{key}")
 
 
 class Store:
