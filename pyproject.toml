@@ -27,6 +27,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-asyncio>=0.24", "asyncua>=1.1"]
 bridge = ["asyncua>=1.1"]
+fx = ["asyncua>=1.1"]
 
 [project.scripts]
 hypernova = "hypernova.cli:main"
