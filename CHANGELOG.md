@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+- **OPC UA FX connection manager** (`hypernova fx`, `hypernova.fx`): be the FX
+  connection manager for FX-capable supernova servers. `describe` a server's
+  automation component (entities, input/output datasets, live connection
+  endpoints); `link` a publisher dataset on one server to a subscriber dataset
+  on another **by name**, with local pre-validation and **atomic rollback** (a
+  failed subscriber side closes the publisher side, never a half-open link);
+  `status` reads connection state live from the servers; `unlink` closes both
+  sides and is idempotent. Refusals surface the server's own diagnostic, so
+  every plausible mistake names its fix. FX connection state stays
+  **server-owned** — hypernova never stores it in the registry; the registry
+  optionally *names* the data-plane stream a link creates (`fx link --register`)
+  so it is browsable and subscribable like any publication. New `[fx]` extra
+  (asyncua, optional). Offline fake-transport unit suite plus a live
+  same-backend and cross-backend end-to-end against real supernova FX servers.
+  See [doc/fx.md](doc/fx.md).
+
 ## 1.0.0 (2026-07-12)
 
 The consolidation release — every v0.1 gap closed:

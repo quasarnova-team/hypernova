@@ -31,3 +31,16 @@ a second internal adversarial review has been absorbed.
   multicast reach, the OPC UA bridge or a relay pinhole serves today.
 - **DIP bridge validated against a stubbed DIP API, not a live DIPNS** —
   on-site validation against a live DIP installation still pending; stated in DIP-PARITY.md.
+
+## Unreleased — OPC UA FX connection manager
+
+Not part of the v1.0 scored record above; recorded here with its evidence.
+
+| Aspect | Evidence |
+|---|---|
+| **Testing (offline)** | 19 FX unit tests (101 in the suite, from 82) drive a fake transport that mirrors a live supernova FX server — its address space, its establish/close state machine and its **exact refusal diagnostics** — so describe, wire, rollback, live status, undo, idempotent unlink, the once-per-direction rule, and every teaching error are proven without a server. |
+| **Testing (live)** | The full loop — describe → link → both Operational → the published value lands in the subscriber's address space (21.5) → unlink → Initial → endpoint-name reuse — passes against two real supernova FX servers as docker cells, driven through `hypernova.fx`, in **same-backend (o6→o6)** and **cross-backend (o6→uasdk)** pairings (13/13 checks each). CLI verbs `describe`/`link --wait`/`status`/`unlink` exercised against the same live pair. |
+| **Safety** | Multi-step wiring is atomic: a refused subscriber side rolls the publisher side back (regression-tested on the fake and observed live). `unlink` attempts both sides and is idempotent. |
+| **Errors teach** | Refusals surface the server's own `detail` diagnostic verbatim; `link` pre-validates against the live self-description and lists the legal datasets/entities before any state changes. Demonstrated in unit tests and the live pre-validation check. |
+| **Design** | FX connection state is server-owned — hypernova stores none in its registry, reading it live instead (rationale in doc/fx.md). The registry optionally *names* the data-plane stream a link creates (`--register`), unit-tested end to end against a real registry. |
+| **Footprint** | No new required dependency; asyncua stays optional under a new `[fx]` extra, imported lazily, exactly like the OPC UA bridge. |

@@ -38,6 +38,7 @@ A dependency-free Java client ships too —
 
 - **[Quickstart](quickstart.md)** — the ten-minute tour: registry, publish, subscribe, browse.
 - **[API](api.md)** — Python client, CLI, and the registry's REST surface.
+- **[OPC UA FX](fx.md)** — be the connection manager: wire two FX servers together at runtime.
 - **[Security](security.md)** — the signing profile and its honest limits.
 - **[Deployment](deployment.md)** — real network boundaries, relays, systemd units.
 - On GitHub: [Architecture](https://github.com/quasarnova-team/hypernova/blob/master/ARCHITECTURE.md) ·
