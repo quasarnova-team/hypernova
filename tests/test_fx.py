@@ -1,8 +1,9 @@
 """FX connection manager — offline. A fake transport mirrors a live supernova
 FX server (its address space, its establish/close state machine and its exact
 refusal diagnostics), so the whole manager — describe, wire, roll back, status,
-undo, teaching errors — is proven without asyncua or a server. The live
-end-to-end against real docker servers is tests/e2e_fx.py."""
+undo, teaching errors — is proven without asyncua or a server. The refusal
+strings here were captured verbatim from a live o6 FX server. The live
+end-to-end against real docker servers is interop/fx_manager_e2e.py."""
 
 import asyncio
 import json
@@ -38,10 +39,14 @@ class FakeFxServer(fx._Transport):
     """An in-memory FX automation component: enough of the real one to exercise
     every manager path, including the precise refusal strings."""
 
+    # Members the real server's strict parser accepts (anything else is refused).
+    _KNOWN_MEMBERS = {"functionalEntity", "role", "dataset", "address", "connectionName",
+                      "publishingIntervalMs", "ttl", "peer"}
+
     def __init__(self, config=None):
         self.config = json.loads(json.dumps(config or _CONFIG))
         self.connections = {}  # name -> dict(status, address, dataset, role, entity, ds, live)
-        self._auto = 0
+        self.name_entity = {}  # every name ever used -> its owning entity (persists past close)
         self.reject_establish = None  # set to a string to force refusal (fault injection)
         self.connected = False
 
@@ -68,6 +73,17 @@ class FakeFxServer(fx._Transport):
         detail = json.dumps({"status": "Error", "diagnostic": diagnostic})
         return BAD_INVALID_ARGUMENT, (["", detail] if outputs == 2 else [detail])
 
+    def _auto_name(self):
+        """Auto-naming reuses the lowest-numbered closed cep-N slot (verified:
+        the live server hands out cep-1 again after cep-1 is closed)."""
+        i = 1
+        while True:
+            candidate = f"cep-{i}"
+            existing = self.connections.get(candidate)
+            if existing is None or not existing["live"]:
+                return candidate
+            i += 1
+
     def _establish(self, argument):
         if self.reject_establish is not None:
             return self._refuse(self.reject_establish, outputs=2)
@@ -75,6 +91,10 @@ class FakeFxServer(fx._Transport):
             req = json.loads(argument)
         except ValueError as error:
             return self._refuse(f"JSON error: {error}", outputs=2)
+        for member in req:
+            if member not in self._KNOWN_MEMBERS:
+                return self._refuse(
+                    f"unknown member {member!r} in the connection configuration", 2)
         entity_name = req.get("functionalEntity")
         role = req.get("role")
         ds_name = req.get("dataset")
@@ -83,33 +103,50 @@ class FakeFxServer(fx._Transport):
             return self._refuse(f"unknown functional entity {entity_name!r}", outputs=2)
         if role not in ("publisher", "subscriber"):
             return self._refuse(f"role must be 'publisher' or 'subscriber', not {role!r}", 2)
+        # optional members that apply to only one role
+        if role == "publisher" and "peer" in req:
+            return self._refuse("'peer' applies to subscriber connections only", 2)
+        if role == "subscriber" and ("ttl" in req or "publishingIntervalMs" in req):
+            return self._refuse("'publishingIntervalMs'/'ttl' apply to publisher connections only", 2)
+        if role == "subscriber" and not isinstance(req.get("peer"), dict):
+            return self._refuse("subscriber connections need a 'peer' object "
+                                "(the publishing side's wire coordinates)", 2)
         entity = entities[entity_name]
         bucket = "outputs" if role == "publisher" else "inputs"
         kind = "output" if role == "publisher" else "input"
         if ds_name not in entity[bucket]:
             return self._refuse(
                 f"functional entity {entity_name!r} has no {kind} dataset {ds_name!r}", 2)
-        if role == "subscriber" and not isinstance(req.get("peer"), dict):
-            return self._refuse("subscriber role requires 'peer' coordinates", 2)
-        # a dataset can be connected once per direction
-        for endpoint in self.connections.values():
+        name = req.get("connectionName")
+        if name:
+            live = self.connections.get(name)
+            if live and live["live"]:
+                return self._refuse(f"connection {name!r} is already established", 2)
+            owner = self.name_entity.get(name)
+            if owner is not None and owner != entity_name:  # endpoints are per entity
+                return self._refuse(
+                    f"connection {name!r} belongs to functional entity {owner!r}", 2)
+        # a dataset can be connected once at a time, per direction
+        for other, endpoint in self.connections.items():
             if (endpoint["live"] and endpoint["entity"] == entity_name
                     and endpoint["ds"] == ds_name and endpoint["role"] == role):
                 return self._refuse(
-                    f"{kind} dataset {entity_name}.{ds_name} already connected", 2)
-        live_in_entity = sum(1 for e in self.connections.values()
-                             if e["live"] and e["entity"] == entity_name)
-        if live_in_entity >= 64:
-            return self._refuse(f"functional entity {entity_name!r} is at its 64-endpoint ceiling", 2)
-        name = req.get("connectionName")
+                    f"dataset {ds_name!r} is already connected as {other!r} — "
+                    "close that connection first", 2)
+        # at most 64 distinct connection names per entity (closed ones count;
+        # reusing an existing name is allowed at the ceiling)
+        distinct = {n for n, e in self.name_entity.items() if e == entity_name}
+        if name and name not in distinct and len(distinct) >= 64:
+            return self._refuse(
+                f"functional entity {entity_name!r} is at its 64 connection-name ceiling", 2)
         if not name:
-            self._auto += 1
-            name = f"cep-{self._auto}"
+            name = self._auto_name()
         status = 3 if role == "publisher" else 2  # publisher Operational, subscriber PreOperational
         self.connections[name] = {
             "status": status, "address": req["address"], "role": role,
             "entity": entity_name, "ds": ds_name, "live": True,
             "dataset": f"{role}:{entity_name}.{ds_name}"}
+        self.name_entity[name] = entity_name
         detail = {"address": req["address"], "status": fx.STATUS_NAMES[status]}
         if role == "publisher":
             wg, dsw = entity["writerGroups"][ds_name]
@@ -401,3 +438,205 @@ async def test_registry_payload_names_the_created_stream(tmp_path):
         assert store.get("cell7/env").fields[0].name == "temperature"
     finally:
         await registry.close()
+
+
+async def test_registry_payload_refuses_unresolved_field_type():
+    class NoTypes(FakeFxServer):
+        async def read_source_type(self, source):
+            return None  # a server whose source types cannot be read
+    a = fx.connect("opc.tcp://a", transport=NoTypes())
+    async with a, server() as b:
+        link = await fx.link(a.publisher("control", "env"),
+                             b.subscriber("control", "setpoints"),
+                             address="opc.udp://239.0.0.7:14840", name="x")
+        with pytest.raises(fx.FxError) as excinfo:
+            await fx.registry_payload(link)
+        # it names the offending fields and points at the manual escape hatch,
+        # rather than silently defaulting a type that would misdecode UADP
+        assert "temperature" in str(excinfo.value) and "count" in str(excinfo.value)
+        assert "hypernova register" in str(excinfo.value)
+
+
+# --------------------------------------------------------------------------- #
+# Fake fidelity to the real establish state machine (strings captured live)
+# --------------------------------------------------------------------------- #
+
+async def test_reestablish_same_name_while_live_is_refused():
+    async with server() as s:
+        await s.establish(entity="control", role="publisher", dataset="env",
+                          address="opc.udp://239.0.0.7:14840", connection_name="L")
+        with pytest.raises(fx.FxRefused) as excinfo:
+            await s.establish(entity="control", role="publisher", dataset="env",
+                              address="opc.udp://239.0.0.7:14840", connection_name="L")
+        assert "connection 'L' is already established" in str(excinfo.value)
+
+
+async def test_link_default_name_collision_second_link_refused():
+    async with server() as a, server() as b:
+        first = await fx.link(a.publisher("control", "env"),
+                              b.subscriber("control", "setpoints"),
+                              address="opc.udp://239.0.0.7:14840")
+        # default names are deterministic (env-to-setpoints), so a second
+        # identical wiring collides on the publisher side and is refused; the
+        # first link is untouched (nothing half-established)
+        with pytest.raises(fx.FxError) as excinfo:
+            await fx.link(a.publisher("control", "env"),
+                          b.subscriber("control", "setpoints"),
+                          address="opc.udp://239.0.0.7:14841")
+        assert "already established" in str(excinfo.value)
+        assert (await first.status())["publisher"].is_operational
+
+
+async def test_establish_strict_vocabulary():
+    async with server() as s:
+        # unknown member (goes through the raw transport — establish() can't emit one)
+        status, outputs = await s._t.call("EstablishConnections", json.dumps({
+            "functionalEntity": "control", "role": "publisher", "dataset": "env",
+            "address": "opc.udp://239.0.0.7:14840", "bogus": 1}))
+        assert "unknown member 'bogus'" in fx._diagnostic(outputs)
+
+        with pytest.raises(fx.FxRefused) as excinfo:  # peer on a publisher
+            await s.establish(entity="control", role="publisher", dataset="env",
+                              address="opc.udp://239.0.0.7:14840",
+                              peer={"publisherId": 1, "writerGroupId": 1, "dataSetWriterId": 1})
+        assert "'peer' applies to subscriber connections only" in str(excinfo.value)
+
+        with pytest.raises(fx.FxRefused) as excinfo:  # ttl on a subscriber
+            await s.establish(entity="control", role="subscriber", dataset="setpoints",
+                              address="opc.udp://0.0.0.0:14840", ttl=5,
+                              peer={"publisherId": 91, "writerGroupId": 200, "dataSetWriterId": 1})
+        assert "apply to publisher connections only" in str(excinfo.value)
+
+        with pytest.raises(fx.FxRefused) as excinfo:  # subscriber without peer
+            await s.establish(entity="control", role="subscriber", dataset="setpoints",
+                              address="opc.udp://0.0.0.0:14840")
+        assert "need a 'peer' object" in str(excinfo.value)
+
+
+async def test_auto_naming_reuses_closed_slot():
+    async with server() as s:
+        first, _ = await s.establish(entity="control", role="publisher", dataset="env",
+                                     address="opc.udp://239.0.0.7:14840")
+        assert first == "cep-1"
+        await s.close_connection("cep-1")
+        second, _ = await s.establish(entity="control", role="publisher", dataset="env",
+                                      address="opc.udp://239.0.0.7:14840")
+        assert second == "cep-1"  # the closed slot is reused, not cep-2
+
+
+async def test_endpoint_ceiling_counts_closed_names_and_allows_reuse():
+    async with server() as s:
+        for i in range(64):  # 64 distinct names, each closed to free the dataset
+            name = f"c{i}"
+            await s.establish(entity="control", role="publisher", dataset="env",
+                              address="opc.udp://239.0.0.7:14840", connection_name=name)
+            await s.close_connection(name)
+        with pytest.raises(fx.FxRefused) as excinfo:  # a 65th new name is refused
+            await s.establish(entity="control", role="publisher", dataset="env",
+                              address="opc.udp://239.0.0.7:14840", connection_name="c64")
+        assert "ceiling" in str(excinfo.value)
+        # but reusing one of the 64 existing (closed) names is allowed
+        reused, _ = await s.establish(entity="control", role="publisher", dataset="env",
+                                      address="opc.udp://239.0.0.7:14840", connection_name="c0")
+        assert reused == "c0"
+
+
+async def test_cross_entity_name_reuse_is_refused():
+    config = {
+        "component": "Cell", "nodeId": "ns=2;s=Cell", "publisherId": 5,
+        "entities": {
+            "a": {"outputs": {"o": [("x", "I.x")]}, "inputs": {}, "writerGroups": {"o": (10, 1)}},
+            "b": {"outputs": {"o2": [("y", "I.y")]}, "inputs": {}, "writerGroups": {"o2": (11, 1)}},
+        },
+        "sourceTypes": {"I.x": "DOUBLE", "I.y": "DOUBLE"},
+    }
+    async with server(config) as s:
+        await s.establish(entity="a", role="publisher", dataset="o",
+                          address="opc.udp://239.0.0.7:14840", connection_name="X")
+        await s.close_connection("X")  # closed, but the name still belongs to 'a'
+        with pytest.raises(fx.FxRefused) as excinfo:
+            await s.establish(entity="b", role="publisher", dataset="o2",
+                              address="opc.udp://239.0.0.7:14840", connection_name="X")
+        assert "belongs to functional entity 'a'" in str(excinfo.value)
+
+
+# --------------------------------------------------------------------------- #
+# Safety under real-network failures (not just FxError)
+# --------------------------------------------------------------------------- #
+
+async def test_coordinates_from_detail_tolerates_missing_key():
+    # a coordinates object missing a key must yield None, not raise KeyError,
+    # so link()'s rollback path (not a crash) handles a malformed publisher reply
+    assert fx.Coordinates.from_detail(
+        {"coordinates": {"publisherId": 1, "writerGroupId": 2}}) is None
+
+
+async def test_link_rolls_back_on_transport_error_not_just_refusal():
+    class DropSub(FakeFxServer):
+        async def call(self, method, argument):
+            if method == "EstablishConnections":
+                raise ConnectionResetError("connection reset by peer")
+            return await FakeFxServer.call(self, method, argument)
+    a = server()
+    b = fx.connect("opc.tcp://b", transport=DropSub())
+    async with a, b:
+        with pytest.raises(fx.FxError) as excinfo:
+            await fx.link(a.publisher("control", "env"),
+                          b.subscriber("control", "setpoints"),
+                          address="opc.udp://239.0.0.7:14840", name="demo")
+        assert "rolled the publisher side back" in str(excinfo.value)
+        assert "connection reset by peer" in str(excinfo.value)
+        # the publisher on A must not be left running by a transport-level failure
+        endpoint = await a.endpoint("control", "demo")
+        assert endpoint is None or endpoint.status_name == "Initial"
+
+
+async def test_link_rollback_survives_cancellation():
+    hang = asyncio.Event()
+
+    class HangSub(FakeFxServer):
+        async def call(self, method, argument):
+            if method == "EstablishConnections":
+                await hang.wait()  # never set: hang until the link task is cancelled
+            return await FakeFxServer.call(self, method, argument)
+    a = server()
+    b = fx.connect("opc.tcp://b", transport=HangSub())
+    async with a, b:
+        task = asyncio.create_task(fx.link(
+            a.publisher("control", "env"), b.subscriber("control", "setpoints"),
+            address="opc.udp://239.0.0.7:14840", name="demo"))
+        await asyncio.sleep(0.05)  # let the publisher side establish, then hang on the subscriber
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        # cancellation must not orphan the publisher — it was rolled back
+        endpoint = await a.endpoint("control", "demo")
+        assert endpoint is None or endpoint.status_name == "Initial"
+
+
+async def test_unlink_attempts_both_sides_on_transport_error():
+    class BrokenClose(FakeFxServer):
+        async def call(self, method, argument):
+            if method == "CloseConnections":
+                raise ConnectionResetError("connection reset")
+            return await FakeFxServer.call(self, method, argument)
+    a = server()
+    b = fx.connect("opc.tcp://b", transport=BrokenClose())
+    async with a, b:
+        link = await fx.link(a.publisher("control", "env"),
+                             b.subscriber("control", "setpoints"),
+                             address="opc.udp://239.0.0.7:14840", name="demo")
+        with pytest.raises(fx.FxError) as excinfo:
+            await fx.unlink(link)
+        assert "unlink incomplete" in str(excinfo.value)
+        assert "connection reset" in str(excinfo.value)
+        # the publisher side on A was still closed despite B's transport failure
+        assert (await a.endpoint("control", "demo")).status_name == "Initial"
+
+
+def test_sanitize_name_truncates_to_bytes_not_characters():
+    # 30 euro signs = 90 UTF-8 bytes; must clip to <=64 bytes on a char boundary
+    result = fx._sanitize_name("€" * 30)
+    assert len(result.encode("utf-8")) <= 64
+    assert result == "€" * 21           # 21 * 3 bytes = 63, no half character
+    assert "�" not in result             # never a broken/replacement character

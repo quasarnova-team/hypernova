@@ -50,6 +50,32 @@ async def scenario(pub_url, sub_url, data_address, listen_address):
             check("available output datasets: env" in str(error),
                   "illegal dataset rejected with a teaching message")
 
+        # 2b — a real server-side refusal reaches us with its diagnostic
+        try:
+            await pub.establish(entity="control", role="publisher", dataset="nope",
+                                address=data_address)
+            check(False, "server refused an unknown dataset")
+        except fx.FxRefused as error:
+            check("no output dataset 'nope'" in error.diagnostic,
+                  "server-side refusal diagnostic arrives over the wire")
+
+        # 2c — a live rollback: occupy the subscriber dataset so the subscriber
+        # side is refused, then confirm link() rolled the publisher back.
+        await sub.establish(entity="control", role="subscriber", dataset="setpoints",
+                            address=listen_address, connection_name="occupant",
+                            peer={"publisherId": 999, "writerGroupId": 999, "dataSetWriterId": 999})
+        try:
+            await fx.link(pub.publisher("control", "env"),
+                          sub.subscriber("control", "setpoints"),
+                          address=data_address, listen_address=listen_address, name="link")
+            check(False, "wiring into an occupied subscriber dataset is refused")
+        except fx.FxError as error:
+            check("rolled the publisher side back" in str(error), "link reports the rollback")
+        rolled_back = await pub.endpoint("control", "link")
+        check(rolled_back is None or not rolled_back.is_operational,
+              "publisher side is not left Operational after a live rollback")
+        await sub.close_connection("occupant")  # free the dataset for the real wiring
+
         # 3 — wire it (atomic; rolls back if the subscriber side fails)
         link = await fx.link(
             pub.publisher("control", "env"),
