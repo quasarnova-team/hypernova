@@ -790,5 +790,14 @@ async def registry_payload(link: Link, *, name: str | None = None,
         "dataSetWriterId": coordinates.dataset_writer_id,
         "fields": fields,
         "description": description or f"FX link {link.name}",
+        # provenance so the registry and browser can mark this stream as
+        # FX-made and show where it came from (see doc/fx.md, the browser section)
+        "fx": {
+            "connection": link.name,
+            "publisher": {"server": link.publisher.server.url,
+                          "entity": link.publisher.entity, "dataset": link.publisher.dataset},
+            "subscriber": {"server": link.subscriber.server.url,
+                           "entity": link.subscriber.entity, "dataset": link.subscriber.dataset},
+        },
         "replace": True,
     }

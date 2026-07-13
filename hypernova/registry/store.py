@@ -59,6 +59,9 @@ class Publication:
     publisher_id_type: str = "UINT16"
     description: str = ""
     endpoints: dict[str, str] = field(default_factory=dict)
+    #: provenance when this stream was created by an FX link (see doc/fx.md):
+    #: {"connection", "publisher": {server,entity,dataset}, "subscriber": {...}}
+    fx: dict | None = None
     lease_seconds: float = DEFAULT_LEASE_SECONDS
     registered_at: float = 0.0
     renewed_at: float = 0.0
@@ -132,6 +135,23 @@ def _validate(publication: Publication) -> None:
         seen.add(spec.name)
     if publication.lease_seconds <= 0:
         raise StoreError("lease_seconds must be positive")
+    if publication.fx is not None:
+        _validate_fx(publication.fx)
+
+
+def _validate_fx(fx: dict) -> None:
+    if not isinstance(fx, dict):
+        raise StoreError("fx provenance must be an object")
+    connection = fx.get("connection")
+    if not isinstance(connection, str) or not connection:
+        raise StoreError("fx.connection must be a non-empty string")
+    for side in ("publisher", "subscriber"):
+        endpoint = fx.get(side)
+        if not isinstance(endpoint, dict):
+            raise StoreError(f"fx.{side} must be an object with server, entity, dataset")
+        for key in ("server", "entity", "dataset"):
+            if not isinstance(endpoint.get(key), str) or not endpoint[key]:
+                raise StoreError(f"fx.{side}.{key} must be a non-empty string")
 
 
 class Store:

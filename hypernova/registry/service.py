@@ -64,6 +64,8 @@ def _publication_json(publication: Publication, listener: Listener, *, detail: b
         "leaseExpired": publication.lease_expired,
         "registeredAt": publication.registered_at,
     }
+    if publication.fx is not None:
+        data["fx"] = publication.fx  # provenance, in list + detail (browser marks it)
     if detail:
         data["values"] = [
             _field_json(f.name, live.last_values[f.name])
@@ -85,6 +87,7 @@ def _publication_from_json(name: str, data: dict) -> Publication:
             fields=fields,
             description=str(data.get("description", "")),
             endpoints=dict(data.get("endpoints", {})),
+            fx=data.get("fx"),  # validated in the store; None for non-FX publications
             lease_seconds=float(data.get("leaseSeconds", 600.0)),
         )
     except (KeyError, TypeError, ValueError) as error:
