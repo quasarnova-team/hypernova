@@ -311,9 +311,13 @@ function walk(node, container, forceOpen) {
 }
 
 // ---- stream detail ----
-function isMulticast(address) {                     // opc.udp://239.x.x.x:port
-  const m = /:\/\/(\d{1,3})\./.exec(address || "");
-  return !!m && +m[1] >= 224 && +m[1] <= 239;
+function ipv4FirstOctet(address) {   // first octet if the host is a dotted-quad IPv4, else null
+  const m = /:\/\/(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})[:/]/.exec(address || "");
+  return m ? +m[1] : null;
+}
+function isMulticast(address) {      // 224.0.0.0–239.255.255.255 (IPv4 multicast)
+  const o = ipv4FirstOctet(address);
+  return o !== null && o >= 224 && o <= 239;
 }
 function fmt(v) {
   if (v === null || v === undefined) return "—";
@@ -345,9 +349,15 @@ function renderDetail() {
       <span class="k">FX</span><span class="conn">${esc(p.fx.connection)}</span>
       <span class="flow"><span class="srv">${esc(p.fx.publisher.server)}</span> ${esc(p.fx.publisher.entity)}/${esc(p.fx.publisher.dataset)}<span class="arrow">→</span><span class="srv">${esc(p.fx.subscriber.server)}</span> ${esc(p.fx.subscriber.entity)}/${esc(p.fx.subscriber.dataset)}</span>
     </div>` : "";
-  const fxNote = (p.fx && live.stale && !isMulticast(p.address))
-    ? `<div class="note">This FX link publishes point-to-point (unicast) straight to the subscriber, so the registry can't join it to show values here — the link is real and running; the servers hold the live state. Check it with <span class="mono">hypernova fx status</span>.</div>`
-    : "";
+  let fxNote = "";
+  if (p.fx && live.stale && !isMulticast(p.address)) {
+    // only claim "unicast" for a real dotted-quad IPv4; a hostname or IPv6
+    // address just means the registry can't hear it from where it sits
+    const why = ipv4FirstOctet(p.address) !== null
+      ? "This FX link publishes point-to-point (unicast) straight to the subscriber, so the registry can't join it to show values here"
+      : "The registry can't hear this stream from here, so it can't show live values";
+    fxNote = `<div class="note">${why} — the link is real and running; the servers hold the live state. Check it with <span class="mono">hypernova fx status</span>.</div>`;
+  }
 
   const rows = (p.values||[]).map(v => {
     const good = v.good;
