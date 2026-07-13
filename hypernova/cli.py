@@ -242,7 +242,8 @@ def _cmd_fx_link(args) -> int:
     sub_entity, sub_dataset = _split_dataset_ref(args.subscriber_dataset)
 
     async def run() -> int:
-        exit_code = 0
+        not_operational = False
+        registry_failed = False
         async with fx.connect(args.pub_url) as a, fx.connect(args.sub_url) as b:
             link = await fx.link(
                 a.publisher(pub_entity, pub_dataset),
@@ -257,7 +258,7 @@ def _cmd_fx_link(args) -> int:
                     await link.wait_operational(timeout=args.timeout)
                 except TimeoutError as error:
                     print(f"  note: {error}", file=sys.stderr)
-                    exit_code = FX_EXIT_NOT_OPERATIONAL
+                    not_operational = True
             state = await link.status()
             for role in ("publisher", "subscriber"):
                 endpoint = state[role]
@@ -288,8 +289,14 @@ def _cmd_fx_link(args) -> int:
                 except (RegistryError, fx.FxError) as error:
                     # the wiring is live and undoable; only the naming failed
                     print(f"  link established; registry naming failed: {error}", file=sys.stderr)
-                    exit_code = FX_EXIT_REGISTRY_FAILED
-        return exit_code
+                    registry_failed = True
+        # operational state trumps naming: a not-Operational link (3) outranks a
+        # registry-naming failure (4) when both happen in one command.
+        if not_operational:
+            return FX_EXIT_NOT_OPERATIONAL
+        if registry_failed:
+            return FX_EXIT_REGISTRY_FAILED
+        return 0
 
     return asyncio.run(run())
 
