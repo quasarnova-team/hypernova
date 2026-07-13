@@ -73,16 +73,19 @@ class FakeFxServer(fx._Transport):
         detail = json.dumps({"status": "Error", "diagnostic": diagnostic})
         return BAD_INVALID_ARGUMENT, (["", detail] if outputs == 2 else [detail])
 
-    def _auto_name(self):
-        """Auto-naming reuses the lowest-numbered closed cep-N slot (verified:
-        the live server hands out cep-1 again after cep-1 is closed)."""
+    def _auto_name(self, entity_name):
+        """Auto-naming reuses a closed slot (verified: after cep-1 is closed the
+        live server hands out cep-1 again; at the ceiling it reuses any closed
+        endpoint rather than minting a new name)."""
+        distinct = {n for n, e in self.name_entity.items() if e == entity_name}
+        if len(distinct) >= 64:  # at the ceiling, reuse a closed endpoint
+            closed = sorted(n for n in distinct if not self.connections[n]["live"])
+            if closed:
+                return closed[0]
         i = 1
-        while True:
-            candidate = f"cep-{i}"
-            existing = self.connections.get(candidate)
-            if existing is None or not existing["live"]:
-                return candidate
+        while self.connections.get(f"cep-{i}", {"live": False})["live"]:
             i += 1
+        return f"cep-{i}"
 
     def _establish(self, argument):
         if self.reject_establish is not None:
@@ -102,7 +105,7 @@ class FakeFxServer(fx._Transport):
         if entity_name not in entities:
             return self._refuse(f"unknown functional entity {entity_name!r}", outputs=2)
         if role not in ("publisher", "subscriber"):
-            return self._refuse(f"role must be 'publisher' or 'subscriber', not {role!r}", 2)
+            return self._refuse("role must be 'publisher' or 'subscriber'", 2)
         # optional members that apply to only one role
         if role == "publisher" and "peer" in req:
             return self._refuse("'peer' applies to subscriber connections only", 2)
@@ -138,9 +141,10 @@ class FakeFxServer(fx._Transport):
         distinct = {n for n, e in self.name_entity.items() if e == entity_name}
         if name and name not in distinct and len(distinct) >= 64:
             return self._refuse(
-                f"functional entity {entity_name!r} is at its 64 connection-name ceiling", 2)
+                f"functional entity {entity_name!r} reached its connection endpoint limit "
+                "(64); close and reuse an existing connection name", 2)
         if not name:
-            name = self._auto_name()
+            name = self._auto_name(entity_name)
         status = 3 if role == "publisher" else 2  # publisher Operational, subscriber PreOperational
         self.connections[name] = {
             "status": status, "address": req["address"], "role": role,
@@ -534,11 +538,16 @@ async def test_endpoint_ceiling_counts_closed_names_and_allows_reuse():
         with pytest.raises(fx.FxRefused) as excinfo:  # a 65th new name is refused
             await s.establish(entity="control", role="publisher", dataset="env",
                               address="opc.udp://239.0.0.7:14840", connection_name="c64")
-        assert "ceiling" in str(excinfo.value)
+        assert "connection endpoint limit (64)" in str(excinfo.value)
         # but reusing one of the 64 existing (closed) names is allowed
         reused, _ = await s.establish(entity="control", role="publisher", dataset="env",
                                       address="opc.udp://239.0.0.7:14840", connection_name="c0")
         assert reused == "c0"
+        await s.close_connection("c0")
+        # auto-naming at the ceiling reuses a closed endpoint, not a 65th name
+        auto, _ = await s.establish(entity="control", role="publisher", dataset="env",
+                                    address="opc.udp://239.0.0.7:14840")
+        assert auto in {f"c{i}" for i in range(64)}  # an existing name, reused
 
 
 async def test_cross_entity_name_reuse_is_refused():
@@ -640,3 +649,67 @@ def test_sanitize_name_truncates_to_bytes_not_characters():
     assert len(result.encode("utf-8")) <= 64
     assert result == "€" * 21           # 21 * 3 bytes = 63, no half character
     assert "�" not in result             # never a broken/replacement character
+
+
+def test_reraise_or_wrap_never_swallows_control_flow():
+    # ordinary exceptions become a teaching FxError naming the phase
+    with pytest.raises(fx.FxError) as excinfo:
+        fx._reraise_or_wrap(ValueError("boom"), "while locating the component")
+    assert "while locating the component: boom" in str(excinfo.value)
+    # an FxError passes straight through (not double-wrapped)
+    with pytest.raises(fx.FxNotCapable):
+        fx._reraise_or_wrap(fx.FxNotCapable("not fx"), "ctx")
+    # cancellation / interrupt / exit are re-raised as themselves — this is the
+    # bug the reviewer flagged in connect(): they must never become an FxError
+    for control in (asyncio.CancelledError(), KeyboardInterrupt(), SystemExit()):
+        with pytest.raises(type(control)):
+            fx._reraise_or_wrap(control, "ctx")
+
+
+async def test_read_endpoint_distinguishes_absent_from_transport_error():
+    ua = pytest.importorskip("asyncua").ua
+    from asyncua.ua.uaerrors import UaStatusCodeError
+
+    class _NodeId:
+        def __init__(self, ident, ns):
+            self.Identifier, self.NamespaceIndex = ident, ns
+
+    class _Component:
+        nodeid = _NodeId("ProcessCell", 2)
+
+    class _Node:
+        def __init__(self, result):
+            self._result = result
+
+        async def read_value(self):
+            if isinstance(self._result, BaseException):
+                raise self._result
+            return self._result
+
+    class _ClientStub:
+        def __init__(self, by_leaf):
+            self.by_leaf = by_leaf
+
+        def get_node(self, nodeid):
+            return _Node(self.by_leaf[nodeid.Identifier.rsplit(".", 1)[1]])
+
+    def transport(by_leaf):
+        t = fx._AsyncuaTransport("opc.tcp://x")
+        t._component, t._client = _Component(), _ClientStub(by_leaf)
+        return t
+
+    # a genuinely absent endpoint (Status node unknown) reads as None
+    absent = transport({"Status": UaStatusCodeError(ua.StatusCodes.BadNodeIdUnknown)})
+    assert await absent.read_endpoint("control", "gone") is None
+
+    # a transport/session failure must propagate, not read as 'missing'
+    dropped = transport({"Status": ConnectionResetError("connection reset")})
+    with pytest.raises(ConnectionResetError):
+        await dropped.read_endpoint("control", "demo")
+
+    # a present endpoint returns its live state
+    present = transport({"Status": 3, "Address": "opc.udp://239.0.0.7:14840",
+                         "Dataset": "publisher:control.env"})
+    assert await present.read_endpoint("control", "demo") == {
+        "name": "demo", "status": 3, "address": "opc.udp://239.0.0.7:14840",
+        "dataset": "publisher:control.env"}
