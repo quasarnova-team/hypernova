@@ -243,6 +243,10 @@ at `hypernova fx status`, so an operator reads "wired, but I can't hear it here"
 rather than "broken." One command reproduces the live proof:
 [`interop/run_fx_browser.sh`](../interop/run_fx_browser.sh).
 
+Provenance is advisory metadata: a registry built before this feature that loads
+a store file written with it simply drops the `fx` field on its next persist —
+the stream keeps working, only the FX marker is lost.
+
 ## Honest limits
 
 These mirror supernova's FX limits — hypernova is a faithful client of that
