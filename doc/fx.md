@@ -99,6 +99,26 @@ Closes the connection on both sides and returns both endpoints to `Initial`.
 `unlink` is idempotent: a side that is already closed is not an error, so the
 same command is safe to run twice or after a partial failure.
 
+## Exit codes (for scripts)
+
+The `fx` verbs use distinct exit codes so a script can tell a real error from a
+qualified success:
+
+| Code | Meaning |
+|---|---|
+| `0` | success |
+| `1` | error (bad usage, unreachable server on a single-target command, an FX refusal) |
+| `3` | `link` established but not Operational within `--wait --timeout` |
+| `4` | `link` established but `--register` could not name it in the registry |
+| `5` | a multi-server `status`/`unlink` sweep had at least one failing server |
+| `130` | interrupted (SIGINT) |
+
+For `link`, exit codes report the *link*, which is always live and undoable by
+the time they are set — the printed `undo:` line works regardless. When both a
+`--wait` timeout **and** a `--register` failure happen in one command, the exit
+code is `3` (operational state outranks naming); the registry failure is still
+printed to stderr.
+
 ## The same in Python
 
 ```python
