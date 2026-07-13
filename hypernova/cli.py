@@ -227,15 +227,22 @@ def _cmd_fx_describe(args) -> int:
     return 0
 
 
+# Distinct nonzero exit codes so scripts can tell these apart from a hard error (1).
+FX_EXIT_NOT_OPERATIONAL = 3   # link established but not Operational within --timeout
+FX_EXIT_REGISTRY_FAILED = 4   # link established but naming it in the registry failed
+FX_EXIT_SWEEP_FAILED = 5      # one or more servers in a status/unlink sweep failed
+
+
 def _cmd_fx_link(args) -> int:
     import asyncio
     from hypernova import fx
-    from hypernova.client import _registry_call, default_registry_url
+    from hypernova.client import RegistryError, _registry_call, _registry_urls
 
     pub_entity, pub_dataset = _split_dataset_ref(args.publisher_dataset)
     sub_entity, sub_dataset = _split_dataset_ref(args.subscriber_dataset)
 
-    async def run():
+    async def run() -> int:
+        exit_code = 0
         async with fx.connect(args.pub_url) as a, fx.connect(args.sub_url) as b:
             link = await fx.link(
                 a.publisher(pub_entity, pub_dataset),
@@ -250,57 +257,96 @@ def _cmd_fx_link(args) -> int:
                     await link.wait_operational(timeout=args.timeout)
                 except TimeoutError as error:
                     print(f"  note: {error}", file=sys.stderr)
+                    exit_code = FX_EXIT_NOT_OPERATIONAL
             state = await link.status()
             for role in ("publisher", "subscriber"):
                 endpoint = state[role]
-                shown = endpoint.status_name if endpoint else "missing"
-                print(f"  {role:<10} {shown}")
-            if args.register is not None:
-                name = args.register or link.name
-                payload = await fx.registry_payload(link, name=name)
-                registry = args.registry or default_registry_url()
-                await asyncio.to_thread(
-                    lambda: _registry_call("PUT", f"{registry}/api/publications/{name}", payload))
-                print(f"  registered stream {name!r} in the registry — browsable and "
-                      "subscribable by name")
+                print(f"  {role:<10} {endpoint.status_name if endpoint else 'missing'}")
+            # The link is up: always give the undo command before anything that
+            # might fail, so it is printed even if naming the stream fails.
             print(f"  undo: hypernova fx unlink {link.name} {args.pub_url} {args.sub_url}")
-    asyncio.run(run())
-    return 0
+            if args.register is not None:
+                registry_name = args.register or link.name
+                try:
+                    payload = await fx.registry_payload(link, name=registry_name)
+                    registries = _registry_urls(args.registry)
+                    failures = []
+                    for registry in registries:
+                        try:
+                            await asyncio.to_thread(
+                                lambda r=registry: _registry_call(
+                                    "PUT", f"{r}/api/publications/{registry_name}", payload))
+                        except RegistryError as error:
+                            failures.append(f"{registry}: {error}")
+                    if failures and len(failures) == len(registries):
+                        raise RegistryError("; ".join(failures))
+                    print(f"  registered stream {registry_name!r} in the registry "
+                          f"({len(registries) - len(failures)}/{len(registries)}) — "
+                          "browsable and subscribable by name")
+                    if failures:
+                        print(f"  (some registries failed: {'; '.join(failures)})", file=sys.stderr)
+                except (RegistryError, fx.FxError) as error:
+                    # the wiring is live and undoable; only the naming failed
+                    print(f"  link established; registry naming failed: {error}", file=sys.stderr)
+                    exit_code = FX_EXIT_REGISTRY_FAILED
+        return exit_code
+
+    return asyncio.run(run())
 
 
 def _cmd_fx_status(args) -> int:
     import asyncio
     from hypernova import fx
 
-    async def run():
+    async def run() -> int:
+        failed = False
         for url in args.urls:
-            async with fx.connect(url) as server:
-                print(url)
-                _print_endpoints(await server.endpoints(args.entity))
-    asyncio.run(run())
-    return 0
+            print(url)
+            try:
+                async with fx.connect(url) as server:
+                    if args.entity is not None:
+                        component = await server.describe()
+                        if component.entity(args.entity) is None:
+                            offered = ", ".join(e.name for e in component.entities) or "(none)"
+                            print(f"  no functional entity {args.entity!r}; it offers: {offered}")
+                            failed = True
+                            continue
+                    _print_endpoints(await server.endpoints(args.entity))
+            except Exception as error:  # noqa: BLE001 — one bad server must not abort the sweep
+                print(f"  unreachable: {error}")
+                failed = True
+        return FX_EXIT_SWEEP_FAILED if failed else 0
+
+    return asyncio.run(run())
 
 
 def _cmd_fx_unlink(args) -> int:
     import asyncio
     from hypernova import fx
 
-    async def run():
-        failures = []
+    async def run() -> int:
+        failed = False
         for url in args.urls:
-            async with fx.connect(url) as server:
-                try:
-                    await server.close_connection(args.connection)
-                    print(f"{url}: closed {args.connection!r}")
-                except fx.FxRefused as error:
-                    if fx._already_closed(error.diagnostic):
-                        print(f"{url}: {args.connection!r} already closed")
-                    else:
-                        failures.append(f"{url}: {error}")
-        if failures:
-            raise SystemExit("unlink incomplete:\n  " + "\n  ".join(failures))
-    asyncio.run(run())
-    return 0
+            try:
+                async with fx.connect(url) as server:
+                    try:
+                        await server.close_connection(args.connection)
+                        print(f"{url}: closed {args.connection!r}")
+                    except fx.FxRefused as error:
+                        # confirm "already closed" by reading the endpoint back,
+                        # not by string-matching the server's refusal prose
+                        endpoint = await server.find_endpoint(args.connection)
+                        if endpoint is None or endpoint.status == 0:
+                            print(f"{url}: {args.connection!r} already closed")
+                        else:
+                            print(f"{url}: refused ({error})")
+                            failed = True
+            except Exception as error:  # noqa: BLE001 — attempt every server, report the unreachable
+                print(f"{url}: unreachable: {error}")
+                failed = True
+        return FX_EXIT_SWEEP_FAILED if failed else 0
+
+    return asyncio.run(run())
 
 
 def main(argv=None) -> int:
