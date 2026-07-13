@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.0 (2026-07-13)
 
 - **OPC UA FX connection manager** (`hypernova fx`, `hypernova.fx`): be the FX
   connection manager for FX-capable supernova servers. `describe` a server's
