@@ -8,6 +8,10 @@
                   --dataset-writer-id D --field name=TYPE... --value name=V... \
                   [--interval SECONDS] [--count N]
     hypernova register <name> --address ... (register without publishing)
+    hypernova fx describe <opc.tcp-url>
+    hypernova fx link <pub-url> <entity/dataset> <sub-url> <entity/dataset> --address <opc.udp>
+    hypernova fx status <opc.tcp-url>...
+    hypernova fx unlink <connection> <opc.tcp-url>...
 """
 
 from __future__ import annotations
@@ -195,6 +199,163 @@ def _cmd_register(args) -> int:
     return 0
 
 
+def _split_dataset_ref(ref: str) -> tuple[str, str]:
+    entity, _, dataset = ref.partition("/")
+    if not entity or not dataset:
+        raise SystemExit(f"expected entity/dataset (e.g. control/env), got {ref!r}")
+    return entity, dataset
+
+
+def _print_endpoints(endpoints, indent="  ") -> None:
+    if not endpoints:
+        print(f"{indent}(no connections)")
+        return
+    width = max(len(e.name) for e in endpoints)
+    for endpoint in endpoints:
+        print(f"{indent}{endpoint.name:<{width}}  {endpoint.status_name:<14}  "
+              f"{endpoint.dataset}  {endpoint.address}")
+
+
+def _cmd_fx_describe(args) -> int:
+    import asyncio
+    from hypernova import fx
+
+    async def run():
+        async with fx.connect(args.url) as server:
+            print(await server.describe())
+    asyncio.run(run())
+    return 0
+
+
+# Distinct nonzero exit codes so scripts can tell these apart from a hard error (1).
+FX_EXIT_NOT_OPERATIONAL = 3   # link established but not Operational within --timeout
+FX_EXIT_REGISTRY_FAILED = 4   # link established but naming it in the registry failed
+FX_EXIT_SWEEP_FAILED = 5      # one or more servers in a status/unlink sweep failed
+
+
+def _cmd_fx_link(args) -> int:
+    import asyncio
+    from hypernova import fx
+    from hypernova.client import RegistryError, _registry_call, _registry_urls
+
+    pub_entity, pub_dataset = _split_dataset_ref(args.publisher_dataset)
+    sub_entity, sub_dataset = _split_dataset_ref(args.subscriber_dataset)
+
+    async def run() -> int:
+        not_operational = False
+        registry_failed = False
+        async with fx.connect(args.pub_url) as a, fx.connect(args.sub_url) as b:
+            link = await fx.link(
+                a.publisher(pub_entity, pub_dataset),
+                b.subscriber(sub_entity, sub_dataset),
+                address=args.address, listen_address=args.listen_address,
+                name=args.name, publishing_interval_ms=args.interval, ttl=args.ttl)
+            print(f"linked {args.pub_url} {pub_entity}/{pub_dataset}  ->  "
+                  f"{args.sub_url} {sub_entity}/{sub_dataset}")
+            print(f"  connection: {link.name}")
+            if args.wait:
+                try:
+                    await link.wait_operational(timeout=args.timeout)
+                except TimeoutError as error:
+                    print(f"  note: {error}", file=sys.stderr)
+                    not_operational = True
+            state = await link.status()
+            for role in ("publisher", "subscriber"):
+                endpoint = state[role]
+                print(f"  {role:<10} {endpoint.status_name if endpoint else 'missing'}")
+            # The link is up: always give the undo command before anything that
+            # might fail, so it is printed even if naming the stream fails.
+            print(f"  undo: hypernova fx unlink {link.name} {args.pub_url} {args.sub_url}")
+            if args.register is not None:
+                registry_name = args.register or link.name
+                try:
+                    payload = await fx.registry_payload(link, name=registry_name)
+                    registries = _registry_urls(args.registry)
+                    failures = []
+                    for registry in registries:
+                        try:
+                            await asyncio.to_thread(
+                                lambda r=registry: _registry_call(
+                                    "PUT", f"{r}/api/publications/{registry_name}", payload))
+                        except RegistryError as error:
+                            failures.append(f"{registry}: {error}")
+                    if failures and len(failures) == len(registries):
+                        raise RegistryError("; ".join(failures))
+                    print(f"  registered stream {registry_name!r} in the registry "
+                          f"({len(registries) - len(failures)}/{len(registries)}) — "
+                          "browsable and subscribable by name")
+                    if failures:
+                        print(f"  (some registries failed: {'; '.join(failures)})", file=sys.stderr)
+                except (RegistryError, fx.FxError) as error:
+                    # the wiring is live and undoable; only the naming failed
+                    print(f"  link established; registry naming failed: {error}", file=sys.stderr)
+                    registry_failed = True
+        # operational state trumps naming: a not-Operational link (3) outranks a
+        # registry-naming failure (4) when both happen in one command.
+        if not_operational:
+            return FX_EXIT_NOT_OPERATIONAL
+        if registry_failed:
+            return FX_EXIT_REGISTRY_FAILED
+        return 0
+
+    return asyncio.run(run())
+
+
+def _cmd_fx_status(args) -> int:
+    import asyncio
+    from hypernova import fx
+
+    async def run() -> int:
+        failed = False
+        for url in args.urls:
+            print(url)
+            try:
+                async with fx.connect(url) as server:
+                    if args.entity is not None:
+                        component = await server.describe()
+                        if component.entity(args.entity) is None:
+                            offered = ", ".join(e.name for e in component.entities) or "(none)"
+                            print(f"  no functional entity {args.entity!r}; it offers: {offered}")
+                            failed = True
+                            continue
+                    _print_endpoints(await server.endpoints(args.entity))
+            except Exception as error:  # noqa: BLE001 — one bad server must not abort the sweep
+                print(f"  unreachable: {error}")
+                failed = True
+        return FX_EXIT_SWEEP_FAILED if failed else 0
+
+    return asyncio.run(run())
+
+
+def _cmd_fx_unlink(args) -> int:
+    import asyncio
+    from hypernova import fx
+
+    async def run() -> int:
+        failed = False
+        for url in args.urls:
+            try:
+                async with fx.connect(url) as server:
+                    try:
+                        await server.close_connection(args.connection)
+                        print(f"{url}: closed {args.connection!r}")
+                    except fx.FxRefused as error:
+                        # confirm "already closed" by reading the endpoint back,
+                        # not by string-matching the server's refusal prose
+                        endpoint = await server.find_endpoint(args.connection)
+                        if endpoint is None or endpoint.status == 0:
+                            print(f"{url}: {args.connection!r} already closed")
+                        else:
+                            print(f"{url}: refused ({error})")
+                            failed = True
+            except Exception as error:  # noqa: BLE001 — attempt every server, report the unreachable
+                print(f"{url}: unreachable: {error}")
+                failed = True
+        return FX_EXIT_SWEEP_FAILED if failed else 0
+
+    return asyncio.run(run())
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog="hypernova",
@@ -275,6 +436,49 @@ def main(argv=None) -> int:
     p.add_argument("--registry")
     p.add_argument("--description", default="")
     p.set_defaults(func=_cmd_register)
+
+    p = sub.add_parser("fx", help="OPC UA FX: wire two servers together at runtime")
+    fx_sub = p.add_subparsers(dest="fx_command", required=True)
+
+    q = fx_sub.add_parser("describe", help="show what an FX server offers "
+                                           "(entities, datasets, live connections)")
+    q.add_argument("url", help="opc.tcp:// endpoint of the FX server")
+    q.set_defaults(func=_cmd_fx_describe)
+
+    q = fx_sub.add_parser("link", help="wire a publisher dataset on A to a "
+                                       "subscriber dataset on B")
+    q.add_argument("pub_url", metavar="PUB_URL", help="opc.tcp:// of the publishing server")
+    q.add_argument("publisher_dataset", metavar="ENTITY/DATASET", help="its output dataset")
+    q.add_argument("sub_url", metavar="SUB_URL", help="opc.tcp:// of the subscribing server")
+    q.add_argument("subscriber_dataset", metavar="ENTITY/DATASET", help="its input dataset")
+    q.add_argument("--address", required=True,
+                   help="opc.udp:// the publisher sends to (a multicast group, or the "
+                        "subscriber's reachable address for unicast)")
+    q.add_argument("--listen-address",
+                   help="opc.udp:// the subscriber binds (default: --address; for unicast "
+                        "use opc.udp://0.0.0.0:PORT)")
+    q.add_argument("--name", help="connection name on both servers (default: <out>-to-<in>)")
+    q.add_argument("--interval", type=int, metavar="MS",
+                   help="publishing interval override in milliseconds")
+    q.add_argument("--ttl", type=int, help="multicast time-to-live (0-255)")
+    q.add_argument("--wait", action="store_true",
+                   help="wait until both endpoints report Operational")
+    q.add_argument("--timeout", type=float, default=10.0)
+    q.add_argument("--register", nargs="?", const="", metavar="NAME",
+                   help="also name the created stream in the registry (multicast); "
+                        "NAME defaults to the connection name")
+    q.add_argument("--registry")
+    q.set_defaults(func=_cmd_fx_link)
+
+    q = fx_sub.add_parser("status", help="live connection endpoints on FX server(s)")
+    q.add_argument("urls", nargs="+", metavar="URL")
+    q.add_argument("--entity", help="only this functional entity")
+    q.set_defaults(func=_cmd_fx_status)
+
+    q = fx_sub.add_parser("unlink", help="close a connection by name on FX server(s)")
+    q.add_argument("connection", help="the connection name to close")
+    q.add_argument("urls", nargs="+", metavar="URL", help="the server(s) holding it (both link sides)")
+    q.set_defaults(func=_cmd_fx_unlink)
 
     args = parser.parse_args(argv)
     try:

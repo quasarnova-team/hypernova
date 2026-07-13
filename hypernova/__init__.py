@@ -11,7 +11,7 @@ from hypernova.wire import (
     WireError,
 )
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 
 def __getattr__(name):

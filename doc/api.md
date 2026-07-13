@@ -62,6 +62,45 @@ with a diagnostic on anything unsupported. Scalars and one-dimensional
 arrays of: Boolean, SByte, Byte, Int16, UInt16, Int32, UInt32, Int64,
 UInt64, Float, Double, String, DateTime.
 
+## OPC UA FX: `hypernova.fx`
+
+Be the FX connection manager for FX-capable supernova servers (full guide:
+[fx.md](fx.md)). Needs the `[fx]` extra (asyncua), imported lazily.
+
+```python
+import asyncio
+from hypernova import fx
+
+async def main():
+    async with fx.connect("opc.tcp://a:4841") as a, fx.connect("opc.tcp://b:4841") as b:
+        component = await a.describe()            # live self-description
+        link = await fx.link(a.publisher("control", "env"),
+                             b.subscriber("control", "setpoints"),
+                             address="opc.udp://239.0.0.7:14840")
+        await link.wait_operational(timeout=10)
+        await fx.unlink(link)
+
+asyncio.run(main())
+```
+
+| Member | Meaning |
+|---|---|
+| `fx.connect(url)` | Async context manager over one FX server (`FxServer`) |
+| `FxServer.describe()` | Live `Component`: entities, `output`/`input` datasets + fields, connection `Endpoint`s |
+| `FxServer.publisher(entity, dataset)` / `.subscriber(...)` | Name one end of a wire (a `DatasetRef`) |
+| `FxServer.establish(...)` / `.close_connection(id)` | One side at a time (low-level); `link`/`unlink` are the safe pair |
+| `fx.link(pub, sub, *, address, listen_address=None, name=None, publishing_interval_ms=None, ttl=None)` | Wire A→B: pre-validated, atomic (rolls the publisher back if the subscriber fails). Returns a `Link` |
+| `Link.status()` / `.is_operational()` / `.wait_operational(timeout=10)` | Read both endpoints live from the servers |
+| `fx.unlink(link)` | Close both sides; idempotent |
+| `fx.registry_payload(link, *, name=None)` | Registration body to name the created stream in the registry (opt-in) |
+
+`address` is where the publisher sends (a multicast group, or the subscriber's
+unicast address); `listen_address` is where the subscriber binds and defaults
+to `address` (for unicast use `opc.udp://0.0.0.0:PORT`). Errors: `FxError`
+(message names the fix), `FxRefused` (carries the server's `diagnostic`),
+`FxNotCapable` (endpoint is not an FX component). Connection state is
+server-owned — hypernova keeps none; see [fx.md](fx.md#fx-links-and-the-registry).
+
 ## Registry REST
 
 | Method + path | Meaning |
@@ -101,6 +140,12 @@ hypernova pub NAME --address A --publisher-id P --writer-group-id W
 hypernova register NAME --address A --publisher-id P --writer-group-id W
               --dataset-writer-id D --field n=TYPE...
               [--endpoint NET=ADDR]... [--replace] [--registry URL]
+hypernova fx describe URL
+hypernova fx link PUB_URL ENTITY/DATASET SUB_URL ENTITY/DATASET --address A
+              [--listen-address L] [--name N] [--interval MS] [--ttl T]
+              [--wait] [--register [NAME]] [--registry URL]
+hypernova fx status URL... [--entity E]
+hypernova fx unlink CONNECTION URL...
 ```
 
 `sub` waits (within `--timeout`) for a name that isn't registered yet —

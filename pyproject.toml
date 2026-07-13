@@ -1,6 +1,6 @@
 [project]
 name = "hypernova"
-version = "1.0.0"
+version = "1.1.0"
 description = "DIP's proven shape — named publications, a registry, subscribe by name — rebuilt on OPC UA Pub/Sub (Part 14). Python & Java clients, boundary relays."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -27,6 +27,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-asyncio>=0.24", "asyncua>=1.1"]
 bridge = ["asyncua>=1.1"]
+fx = ["asyncua>=1.1"]
 
 [project.scripts]
 hypernova = "hypernova.cli:main"

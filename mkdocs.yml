@@ -43,6 +43,7 @@ nav:
   - Home: index.md
   - Quickstart: quickstart.md
   - API: api.md
+  - OPC UA FX: fx.md
   - Security: security.md
   - Deployment: deployment.md
 

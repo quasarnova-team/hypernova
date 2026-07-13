@@ -71,6 +71,7 @@ element in its config.xml
 | `hypernova relay` | The firewall exception as a process: joins streams on one network, re-emits to explicit targets on another. One auditable config per boundary — and it can **sign at the boundary** (below). |
 | `hypernova bridge-opcua` | Serves publications as a classic OPC UA server, so any OPC UA client — including commercial SCADA tools — can consume streams without Part 14 support. |
 | `hypernova bridge-dip` | The migration path: republish existing DIP publications as hypernova streams; consumers move one at a time, publishers untouched. |
+| `hypernova fx` | Be the OPC UA **FX** connection manager: `describe` what an FX server offers, `link` a publisher dataset on A to a subscriber dataset on B by name, watch live `status`, `unlink` cleanly — atomic wiring with rollback. |
 | `hypernova sub/pub/browse/register` | The CLI for humans and scripts. |
 
 ## Signed where it matters
@@ -110,7 +111,8 @@ pip install "hypernova[bridge] @ git+https://github.com/quasarnova-team/hypernov
 
 Docs site: [quasarnova-team.github.io/hypernova](https://quasarnova-team.github.io/hypernova/) ·
 ten-minute tour: [doc/quickstart.md](doc/quickstart.md) · API:
-[doc/api.md](doc/api.md) · deploying across real network boundaries (+
+[doc/api.md](doc/api.md) · OPC UA FX (wire two servers at runtime):
+[doc/fx.md](doc/fx.md) · deploying across real network boundaries (+
 systemd units in [deploy/](deploy/)): [doc/deployment.md](doc/deployment.md)
 
 ## Heritage
