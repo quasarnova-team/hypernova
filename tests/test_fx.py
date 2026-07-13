@@ -643,6 +643,79 @@ async def test_unlink_attempts_both_sides_on_transport_error():
         assert (await a.endpoint("control", "demo")).status_name == "Initial"
 
 
+# --------------------------------------------------------------------------- #
+# FX provenance in the registry + browser (the registry "profits" from FX)
+# --------------------------------------------------------------------------- #
+
+async def test_registry_payload_carries_fx_provenance():
+    async with server() as a, server() as b:
+        link = await fx.link(a.publisher("control", "env"),
+                             b.subscriber("control", "setpoints"),
+                             address="opc.udp://239.0.0.7:14840", name="cell7/env")
+        payload = await fx.registry_payload(link)
+        assert payload["fx"] == {
+            "connection": "cell7/env",
+            "publisher": {"server": a.url, "entity": "control", "dataset": "env"},
+            "subscriber": {"server": b.url, "entity": "control", "dataset": "setpoints"},
+        }
+
+
+def test_store_roundtrips_and_validates_fx_provenance(tmp_path):
+    from hypernova.registry.store import FieldSpec, Publication, StoreError
+    provenance = {
+        "connection": "link",
+        "publisher": {"server": "opc.tcp://a:4841", "entity": "control", "dataset": "env"},
+        "subscriber": {"server": "opc.tcp://b:4841", "entity": "control", "dataset": "setpoints"}}
+    store = Store(tmp_path / "reg.json")
+    store.register(Publication(name="cell/x", address="opc.udp://239.0.0.7:14840",
+                               publisher_id=91, writer_group_id=200, dataset_writer_id=1,
+                               fields=[FieldSpec("temperature", "DOUBLE")], fx=provenance))
+    assert Store(tmp_path / "reg.json").get("cell/x").fx == provenance  # persists + reloads intact
+    with pytest.raises(StoreError) as excinfo:  # a hand-edited/garbled provenance is refused
+        store.register(Publication(name="cell/y", address="opc.udp://239.0.0.7:14841",
+                                   publisher_id=92, writer_group_id=201, dataset_writer_id=1,
+                                   fields=[FieldSpec("t", "DOUBLE")],
+                                   fx={"connection": "l", "publisher": {"server": "x"}}), replace=True)
+    assert "fx.publisher" in str(excinfo.value)
+
+
+async def test_api_exposes_fx_in_list_and_detail(tmp_path):
+    store = Store(tmp_path / "reg.json")
+    registry = TestServer(create_app(store, listen=False))
+    await registry.start_server()
+    try:
+        import urllib.request
+        base = f"http://{registry.host}:{registry.port}"
+        body = json.dumps({
+            "address": "opc.udp://239.0.0.7:14840", "publisherId": 91,
+            "writerGroupId": 200, "dataSetWriterId": 1,
+            "fields": [{"name": "temperature", "type": "DOUBLE"}],
+            "fx": {"connection": "cell7/env",
+                   "publisher": {"server": "opc.tcp://a:4841", "entity": "control", "dataset": "env"},
+                   "subscriber": {"server": "opc.tcp://b:4841", "entity": "control", "dataset": "setpoints"}},
+        }).encode()
+        request = urllib.request.Request(base + "/api/publications/cell7/env", data=body,
+                                         method="PUT", headers={"Content-Type": "application/json"})
+        await asyncio.to_thread(lambda: urllib.request.urlopen(request).read())
+        listing = json.loads(await asyncio.to_thread(
+            lambda: urllib.request.urlopen(base + "/api/publications").read()))
+        detail = json.loads(await asyncio.to_thread(
+            lambda: urllib.request.urlopen(base + "/api/publications/cell7/env").read()))
+        assert listing[0]["fx"]["connection"] == "cell7/env"        # the tree can mark it
+        assert detail["fx"]["publisher"]["dataset"] == "env"        # the detail shows provenance
+    finally:
+        await registry.close()
+
+
+def test_browser_renders_fx_provenance():
+    from hypernova.registry.ui import INDEX_HTML
+    # the browser must render the provenance the API now carries
+    assert "fxbar" in INDEX_HTML and "p.fx" in INDEX_HTML   # the provenance bar
+    assert "FX link" in INDEX_HTML                          # the detail badge
+    assert "fxtag" in INDEX_HTML                            # the namespace-tree marker
+    assert "isMulticast" in INDEX_HTML                      # the honest unicast note
+
+
 def test_sanitize_name_truncates_to_bytes_not_characters():
     # 30 euro signs = 90 UTF-8 bytes; must clip to <=64 bytes on a char boundary
     result = fx._sanitize_name("€" * 30)
