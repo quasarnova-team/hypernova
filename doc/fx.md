@@ -223,6 +223,26 @@ connections; hypernova's registry optionally names the streams those
 connections create.** Connections live where they are true; names live where
 names live.
 
+### In the browser
+
+Once registered, an FX-made stream is a first-class citizen of the registry
+browser. It appears in the namespace tree with an **`FX`** tag, and its detail
+view carries an **FX link** badge and a provenance bar naming the connection and
+both ends — *publisher server · entity/dataset → subscriber server ·
+entity/dataset*:
+
+<p align="center"><img src="images/fx-browser.png" alt="The hypernova registry browser showing an FX-made stream: an FX tag in the tree, an FX link badge, a provenance bar, and live values at ~10 Hz" style="max-width:100%"></p>
+
+For a **multicast** link the registry joins the group and shows the stream
+exactly like any native publication — live values, rate, freshness, quality and
+per-field sparklines (above: one `fx link --register` command, then the stream
+is live at ~10 Hz, marked FX, with full provenance). For a **unicast** link the
+registry can't join the point-to-point flow, so the stream is stored and
+browsable by name but shows *stale* — the detail view says so plainly and points
+at `hypernova fx status`, so an operator reads "wired, but I can't hear it here"
+rather than "broken." One command reproduces the live proof:
+[`interop/run_fx_browser.sh`](../interop/run_fx_browser.sh).
+
 ## Honest limits
 
 These mirror supernova's FX limits — hypernova is a faithful client of that
