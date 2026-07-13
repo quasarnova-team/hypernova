@@ -175,7 +175,11 @@ class Coordinates:
     @classmethod
     def from_detail(cls, detail: dict) -> "Coordinates | None":
         c = (detail or {}).get("coordinates")
-        if not isinstance(c, dict) or "publisherId" not in c:
+        # any missing key means the publisher gave us nothing to wire a
+        # subscriber with — return None so link() takes the rollback path
+        # rather than raising KeyError past its rollback guard.
+        if not isinstance(c, dict) or not all(
+                k in c for k in ("publisherId", "writerGroupId", "dataSetWriterId")):
             return None
         return cls(
             publisher_id=c["publisherId"],
@@ -212,6 +216,18 @@ class _Transport:
         (used only by the optional registry bridge)."""
         return None
 
+    async def read_endpoint(self, entity: str, name: str) -> dict | None:
+        """One connection endpoint's live state, or None if it does not exist.
+        Default: derive from a full snapshot; the asyncua transport overrides
+        this to read just the endpoint's Status/Address/Dataset variables."""
+        for e in (await self.snapshot()).get("entities", []):
+            if e["name"] != entity:
+                continue
+            for ep in e.get("endpoints", []):
+                if ep["name"] == name:
+                    return ep
+        return None
+
 
 class _AsyncuaTransport(_Transport):
     """Talks to a live FX server over OPC UA client/server with asyncua."""
@@ -234,7 +250,16 @@ class _AsyncuaTransport(_Transport):
         except Exception as error:  # noqa: BLE001 — many asyncua/socket error types
             raise FxError(f"cannot reach FX server at {self.url}: {error}. "
                           "Check the opc.tcp endpoint and that the server is up.") from None
-        await self._locate()
+        # If locating the component fails (e.g. a non-FX endpoint), the session
+        # and asyncua's two keepalive/subscription tasks are already live — tear
+        # them down before propagating, so a failed connect() leaks nothing.
+        try:
+            await self._locate()
+        except BaseException as error:
+            await self.disconnect()
+            if isinstance(error, FxError):
+                raise
+            raise FxError(f"could not read the FX component on {self.url}: {error}") from error
 
     async def disconnect(self) -> None:
         if self._client is not None:
@@ -321,6 +346,27 @@ class _AsyncuaTransport(_Transport):
                              "inputs": datasets["input"], "endpoints": endpoints})
         return {"component": (await comp.read_browse_name()).Name,
                 "nodeId": comp.nodeid.to_string(), "entities": entities}
+
+    async def read_endpoint(self, entity: str, name: str) -> dict | None:
+        """Read just this endpoint's Status/Address/Dataset — three node reads,
+        not a full address-space browse (status polling calls this often)."""
+        from asyncua import ua
+        identifier = self._component.nodeid.Identifier
+        namespace = self._component.nodeid.NamespaceIndex
+        base = f"{identifier}.FunctionalEntities.{entity}.ConnectionEndpoints.{name}"
+
+        async def read(leaf):
+            try:
+                return await self._client.get_node(ua.NodeId(f"{base}.{leaf}", namespace)).read_value()
+            except Exception:  # noqa: BLE001 — a missing endpoint reads as absent
+                return None
+
+        status, address, dataset = await asyncio.gather(
+            read("Status"), read("Address"), read("Dataset"))
+        if status is None:
+            return None
+        return {"name": name, "status": int(status),
+                "address": address or "", "dataset": dataset or ""}
 
     async def read_source_type(self, source: str) -> str | None:
         """The wire type of a source cache variable (for the registry bridge).
@@ -453,7 +499,15 @@ class FxServer:
         return result
 
     async def endpoint(self, entity: str, connection_name: str) -> Endpoint | None:
-        for ep in await self.endpoints(entity):
+        """One endpoint's live state (cheap: reads only its variables)."""
+        raw = await self._t.read_endpoint(entity, connection_name)
+        if raw is None:
+            return None
+        return Endpoint(raw["name"], raw["status"], raw.get("address", ""), raw.get("dataset", ""))
+
+    async def find_endpoint(self, connection_name: str) -> Endpoint | None:
+        """Locate an endpoint by name across all entities (entity unknown)."""
+        for ep in await self.endpoints():
             if ep.name == connection_name:
                 return ep
         return None
@@ -515,7 +569,7 @@ class Link:
     async def wait_operational(self, timeout: float = 10.0, poll: float = 0.2) -> dict:
         """Poll until both endpoints report Operational, or raise TimeoutError
         naming the last-seen state (a subscriber goes Operational on first data)."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
         state: dict = {}
         while loop.time() < deadline:
@@ -536,7 +590,9 @@ class Link:
 
 def _sanitize_name(name: str) -> str:
     clean = "".join(c for c in name if c.isprintable() and ord(c) >= 32)
-    return clean[:64] or "cep"
+    # the server bounds the name at 64 *bytes*, not characters; truncate on the
+    # UTF-8 boundary so a multibyte character is never cut in half.
+    return clean.encode("utf-8")[:64].decode("utf-8", "ignore") or "cep"
 
 
 def _connection_name(name: str | None, publisher: DatasetRef, subscriber: DatasetRef) -> str:
@@ -563,10 +619,13 @@ def _require_dataset(component: Component, entity_name: str, dataset_name: str,
 
 
 async def _safe_close(server: FxServer, connection_id: str) -> str | None:
+    """Best-effort rollback close. Shielded so that a cancellation of the
+    caller cannot abandon a just-established publisher; returns an error string
+    (never raises) for any ordinary failure, letting cancellation propagate."""
     try:
-        await server.close_connection(connection_id)
+        await asyncio.shield(server.close_connection(connection_id))
         return None
-    except FxError as error:
+    except Exception as error:  # noqa: BLE001 — rollback must not raise over the real cause
         return str(error)
 
 
@@ -598,10 +657,16 @@ async def link(publisher: DatasetRef, subscriber: DatasetRef, *, address: str,
     connection_name = _connection_name(name, publisher, subscriber)
     listen = listen_address or address
 
-    pub_id, pub_detail = await publisher.server.establish(
-        entity=publisher.entity, role="publisher", dataset=publisher.dataset,
-        address=address, connection_name=connection_name,
-        publishing_interval_ms=publishing_interval_ms, ttl=ttl)
+    try:
+        pub_id, pub_detail = await publisher.server.establish(
+            entity=publisher.entity, role="publisher", dataset=publisher.dataset,
+            address=address, connection_name=connection_name,
+            publishing_interval_ms=publishing_interval_ms, ttl=ttl)
+    except FxError:
+        raise  # already a teaching error; nothing established, nothing to undo
+    except Exception as error:  # noqa: BLE001 — transport/asyncua failure, name the phase
+        raise FxError(f"publisher side failed to establish on {publisher.server.url}: "
+                      f"{error}") from error
 
     coordinates = Coordinates.from_detail(pub_detail)
     if coordinates is None:
@@ -613,8 +678,14 @@ async def link(publisher: DatasetRef, subscriber: DatasetRef, *, address: str,
         sub_id, _ = await subscriber.server.establish(
             entity=subscriber.entity, role="subscriber", dataset=subscriber.dataset,
             address=listen, connection_name=connection_name, peer=coordinates.as_peer())
-    except FxError as error:
+    except BaseException as error:
+        # Roll the publisher back however the subscriber side failed — a refusal,
+        # a dropped connection, a timeout, or a cancellation — so a failure never
+        # leaves the publisher emitting into a half-open link. Cancellation is
+        # re-raised (not wrapped) after the rollback so it still cancels.
         rollback = await _safe_close(publisher.server, pub_id)
+        if isinstance(error, (asyncio.CancelledError, KeyboardInterrupt, SystemExit)):
+            raise
         message = (f"subscriber side failed on {subscriber.server.url} ({error}); "
                    f"rolled the publisher side back on {publisher.server.url} to avoid a "
                    "half-open link")
@@ -627,24 +698,31 @@ async def link(publisher: DatasetRef, subscriber: DatasetRef, *, address: str,
                 publisher_connection_id=pub_id, subscriber_connection_id=sub_id)
 
 
-def _already_closed(diagnostic: str) -> bool:
-    """A close refusal that just means the side is already down (Initial)."""
-    return "not established" in diagnostic or "unknown connection" in diagnostic
+async def _confirm_closed(server: FxServer, entity: str | None, connection_id: str) -> bool:
+    """After a close was refused, decide whether the side is down anyway by
+    *reading its status back* — absent or Initial means already closed
+    (idempotent success) — rather than string-matching the server's prose."""
+    try:
+        endpoint = (await server.endpoint(entity, connection_id) if entity is not None
+                    else await server.find_endpoint(connection_id))
+    except Exception:  # noqa: BLE001 — if we cannot even read it, treat the refusal as real
+        return False
+    return endpoint is None or endpoint.status == 0
 
 
 async def unlink(link: Link) -> None:
-    """Close both sides of a link. Attempts both even if one fails, and raises
-    only after — so one broken side never strands the other. Idempotent: a side
-    that is already closed is not an error."""
+    """Close both sides of a link. Attempts both even if one fails — however it
+    fails, transport error included — and raises only after, so one broken side
+    never strands the other. Idempotent: a side already down is not an error."""
     errors = []
     for side, connection_id in ((link.subscriber, link.subscriber_connection_id),
                                 (link.publisher, link.publisher_connection_id)):
         try:
             await side.server.close_connection(connection_id)
         except FxRefused as error:
-            if not _already_closed(error.diagnostic):
+            if not await _confirm_closed(side.server, side.entity, connection_id):
                 errors.append(f"{side.role} on {side.server.url}: {error}")
-        except FxError as error:
+        except Exception as error:  # noqa: BLE001 — never let one side's failure strand the other
             errors.append(f"{side.role} on {side.server.url}: {error}")
     if errors:
         raise FxError("unlink incomplete: " + "; ".join(errors))
@@ -656,8 +734,9 @@ async def registry_payload(link: Link, *, name: str | None = None,
     link's publisher produces — so an FX-created flow can be browsed and
     subscribed by name like any other publication. The FX *connection* state
     stays server-owned; this only names the resulting Part 14 stream. Field
-    types are read from the source cache variables (best-effort, default
-    ``DOUBLE``). See ``doc/fx.md`` for the registry-relationship decision."""
+    types are read from the source cache variables; an unreadable type is
+    refused (not defaulted — a wrong type would drive UADP decoding).
+    See ``doc/fx.md`` for the registry-relationship decision."""
     server = link.publisher.server
     component = await server.describe()
     entity = component.entity(link.publisher.entity)
@@ -665,8 +744,21 @@ async def registry_payload(link: Link, *, name: str | None = None,
     if dataset is None:
         raise FxError(f"cannot name stream: {link.publisher.dataset!r} is no longer an "
                       f"output dataset on {server.url}")
-    fields = [{"name": f.name, "type": (await server.source_type(f.source)) or "DOUBLE"}
-              for f in dataset.fields]
+    fields, unresolved = [], []
+    for f in dataset.fields:
+        wire_type = await server.source_type(f.source)
+        if wire_type is None:
+            unresolved.append(f.name)
+        fields.append({"name": f.name, "type": wire_type})
+    if unresolved:
+        raise FxError(
+            f"cannot name stream {name or link.name!r}: the wire type of field(s) "
+            f"{', '.join(unresolved)} could not be read from their source cache "
+            f"variables on {server.url}. Register it explicitly instead: "
+            "`hypernova register <name> --field name=TYPE ...` with the coordinates "
+            f"publisherId={link.coordinates.publisher_id}, "
+            f"writerGroupId={link.coordinates.writer_group_id}, "
+            f"dataSetWriterId={link.coordinates.dataset_writer_id}.")
     coordinates = link.coordinates
     return {
         "name": name or link.name,
