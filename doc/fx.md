@@ -241,7 +241,7 @@ registry can't join the point-to-point flow, so the stream is stored and
 browsable by name but shows *stale* — the detail view says so plainly and points
 at `hypernova fx status`, so an operator reads "wired, but I can't hear it here"
 rather than "broken." One command reproduces the live proof:
-[`interop/run_fx_browser.sh`](../interop/run_fx_browser.sh).
+[`interop/run_fx_browser.sh`](https://github.com/quasarnova-team/hypernova/blob/master/interop/run_fx_browser.sh).
 
 Provenance is advisory metadata: a registry built before this feature that loads
 a store file written with it simply drops the `fx` field on its next persist —
