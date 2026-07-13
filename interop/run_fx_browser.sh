@@ -69,9 +69,29 @@ HASH=$("$PY" -c "import urllib.parse;print(urllib.parse.quote('$NAME',safe=''))"
   --screenshot="$OUT/fx_browser.png" "http://localhost:4850/#$HASH" >/dev/null 2>&1 || true
 curl -s http://localhost:4850/ > "$OUT/fx_browser_index.html"
 
-if [ -n "$live" ]; then
-  echo "PASS: registry heard the multicast FX stream live and marked it FX"
+echo "=== XSS guard: a hostile fx provenance must render escaped, not as markup ==="
+"$PY" -c 'import json,sys; sys.stdout.write(json.dumps({
+  "address":"opc.udp://127.0.0.1:14899","publisherId":77,"writerGroupId":300,"dataSetWriterId":1,
+  "fields":[{"name":"t","type":"DOUBLE"}],
+  "fx":{"connection":"\"><img src=x onerror=alert(document.domain)>",
+        "publisher":{"server":"s","entity":"e","dataset":"d"},
+        "subscriber":{"server":"s","entity":"e","dataset":"d"}}}))' \
+  | curl -s -X PUT "http://localhost:4850/api/publications/hostile/fx" \
+      -H 'Content-Type: application/json' --data-binary @- >/dev/null
+"$CHROME" --headless=new --disable-gpu --no-sandbox --virtual-time-budget=5000 \
+  --dump-dom "http://localhost:4850/#hostile%2Ffx" > "$OUT/hostile_dom.html" 2>/dev/null || true
+xss="PASS"
+if grep -qi '<img[^>]*onerror' "$OUT/hostile_dom.html"; then
+  echo "  XSS FAIL: hostile provenance rendered as a live <img> element"; xss="FAIL"
+elif grep -qi 'onerror=alert' "$OUT/hostile_dom.html"; then
+  echo "  XSS PASS: hostile provenance rendered escaped (inert text)"
+else
+  echo "  XSS INCONCLUSIVE: payload not found in DOM"; xss="INCONCLUSIVE"
+fi
+
+if [ -n "$live" ] && [ "$xss" = "PASS" ]; then
+  echo "PASS: registry heard the multicast FX stream live, marked it FX, escaped hostile input"
   echo "  evidence: $OUT/fx_browser.png, fx_browser_api.json, fx_browser_index.html"
 else
-  echo "FAIL: registry did not hear the multicast stream (see $OUT/fx_browser_api.json)"; exit 1
+  echo "FAIL: live=${live:-no} xss=$xss (see $OUT/fx_browser_api.json, hostile_dom.html)"; exit 1
 fi
