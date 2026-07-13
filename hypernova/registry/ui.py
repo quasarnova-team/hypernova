@@ -107,8 +107,22 @@ INDEX_HTML = r"""<!doctype html>
   .badge.stale { color:var(--bad); border-color:var(--bad); }
   .badge.signed { color:var(--sig); border-color:var(--sig); }
   .badge.lease { color:var(--ink-soft); border-color:var(--line); }
+  .badge.fx { color:var(--accent); border-color:var(--accent); }
   .coords { color:var(--ink-soft); font-size:13px; margin:8px 0 20px; font-family:var(--mono); }
   .coords .desc { color:var(--ink-faint); }
+
+  /* FX provenance: this stream was wired by an `fx link` */
+  .fxbar { display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; margin:0 0 20px;
+           padding:11px 14px; border-radius:10px;
+           background:color-mix(in srgb, var(--accent) 8%, var(--panel));
+           border:1px solid color-mix(in srgb, var(--accent) 32%, var(--line)); }
+  .fxbar .k { font-size:10.5px; font-weight:800; letter-spacing:.09em; text-transform:uppercase; color:var(--accent); }
+  .fxbar .conn { font-family:var(--mono); font-weight:700; color:var(--ink); }
+  .fxbar .flow { font-family:var(--mono); font-size:12.5px; color:var(--ink-soft); }
+  .fxbar .flow .arrow { color:var(--accent); font-weight:700; padding:0 3px; }
+  .fxbar .flow .srv { color:var(--ink-faint); }
+  .fxtag { font-family:var(--mono); font-size:9px; font-weight:800; letter-spacing:.04em; color:var(--accent);
+           border:1px solid var(--accent); border-radius:4px; padding:0 3px; line-height:1.6; flex:none; }
 
   .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:12px; margin-bottom:22px; }
   .stat { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px 14px; }
@@ -271,6 +285,7 @@ function walk(node, container, forceOpen) {
       row.innerHTML = `<span class="caret leaf">▶</span>
         <span class="sdot ${lv.stale ? "stale" : (lv.lastSeen!=null?"live":"none")}"></span>
         <span class="seg leaf-label">${esc(seg)}</span>
+        ${child.pub.fx ? '<span class="fxtag" title="wired by an fx link">FX</span>' : ""}
         <span class="count">${lv.rateHz ? lv.rateHz+" Hz" : ""}</span>`;
       row.onclick = () => {
         selected = (selected===child.path ? null : child.path);
@@ -296,6 +311,10 @@ function walk(node, container, forceOpen) {
 }
 
 // ---- stream detail ----
+function isMulticast(address) {                     // opc.udp://239.x.x.x:port
+  const m = /:\/\/(\d{1,3})\./.exec(address || "");
+  return !!m && +m[1] >= 224 && +m[1] <= 239;
+}
 function fmt(v) {
   if (v === null || v === undefined) return "—";
   if (Array.isArray(v)) return "[" + v.slice(0,8).map(fmt).join(", ") + (v.length>8?", …":"") + "]";
@@ -321,6 +340,14 @@ function renderDetail() {
     : `<span class="badge live">live</span>`;
   const signed = live.signed ? `<span class="badge signed" title="frames carry a signature; the registry holds no key so it is shown unverified">signed</span>` : "";
   const lease = (p.leaseExpired && live.stale) ? `<span class="badge lease">lease expired</span>` : "";
+  const fxBadge = p.fx ? `<span class="badge fx" title="this stream was created by an FX link">FX link</span>` : "";
+  const fxBar = p.fx ? `<div class="fxbar">
+      <span class="k">FX</span><span class="conn">${esc(p.fx.connection)}</span>
+      <span class="flow"><span class="srv">${esc(p.fx.publisher.server)}</span> ${esc(p.fx.publisher.entity)}/${esc(p.fx.publisher.dataset)}<span class="arrow">→</span><span class="srv">${esc(p.fx.subscriber.server)}</span> ${esc(p.fx.subscriber.entity)}/${esc(p.fx.subscriber.dataset)}</span>
+    </div>` : "";
+  const fxNote = (p.fx && live.stale && !isMulticast(p.address))
+    ? `<div class="note">This FX link publishes point-to-point (unicast) straight to the subscriber, so the registry can't join it to show values here — the link is real and running; the servers hold the live state. Check it with <span class="mono">hypernova fx status</span>.</div>`
+    : "";
 
   const rows = (p.values||[]).map(v => {
     const good = v.good;
@@ -338,8 +365,9 @@ function renderDetail() {
 
   main.innerHTML = `<div class="detail">
     <h1>${esc(p.name)}</h1>
-    <div class="badges">${stateBadge}${signed}${lease}</div>
+    <div class="badges">${stateBadge}${fxBadge}${signed}${lease}</div>
     <div class="coords">publisher ${p.publisherId} (${esc(p.publisherIdType)}) · writer group ${p.writerGroupId} · dataset writer ${p.dataSetWriterId} · <span class="mono">${esc(p.address)}</span>${p.description?` · <span class="desc">${esc(p.description)}</span>`:""}</div>
+    ${fxBar}
     <div class="stats">
       <div class="stat"><div class="k">rate</div><div class="v">${live.rateHz||0}<small> Hz</small></div></div>
       <div class="stat"><div class="k">messages</div><div class="v">${(live.messages||0).toLocaleString()}</div></div>
@@ -356,6 +384,7 @@ function renderDetail() {
       <button class="btn" data-copy="${encodeURIComponent(snippetXml(p))}" data-label="Copy supernova DataSetReader">${copyIcon()} Copy supernova DataSetReader</button>
     </div>
     ${live.signed ? '<div class="note">This stream is signed. The registry shows values unverified (it holds no keys); a subscriber with the key verifies them.</div>' : ''}
+    ${fxNote}
   </div>`;
 
   document.querySelectorAll("canvas.spark").forEach(c => drawSpark(c, history[c.dataset.field] || []));
