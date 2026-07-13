@@ -6,10 +6,12 @@
   connection manager for FX-capable supernova servers. `describe` a server's
   automation component (entities, input/output datasets, live connection
   endpoints); `link` a publisher dataset on one server to a subscriber dataset
-  on another **by name**, with local pre-validation and **atomic rollback** (a
-  failed subscriber side closes the publisher side, never a half-open link);
+  on another **by name**, with local pre-validation and **atomic rollback**
+  (however the subscriber side fails — a refusal, a transport error, or a
+  cancellation — the publisher side is closed, never a half-open link);
   `status` reads connection state live from the servers; `unlink` closes both
-  sides and is idempotent. Refusals surface the server's own diagnostic, so
+  sides (even on a transport failure) and is idempotent. Refusals surface the
+  server's own diagnostic, so
   every plausible mistake names its fix. FX connection state stays
   **server-owned** — hypernova never stores it in the registry; the registry
   optionally *names* the data-plane stream a link creates (`fx link --register`)

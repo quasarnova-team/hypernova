@@ -142,8 +142,10 @@ available output datasets: env
 ```
 
 **Atomic wiring with rollback.** If the publisher side establishes but the
-subscriber side is refused, `link` rolls the publisher back — it closes it —
-so a failed wiring never leaves a half-open connection publishing into the void:
+subscriber side fails — however it fails: a refusal, a dropped connection, a
+timeout, even a cancellation of the call — `link` rolls the publisher back (it
+closes it), so a failed wiring never leaves a half-open connection publishing
+into the void:
 
 ```
 subscriber side failed on opc.tcp://server-b:4841 (... refused ...);
@@ -186,9 +188,11 @@ hypernova fx link ... --address opc.udp://239.0.0.7:14840 --register cell7/env
 ```
 
 `--register` registers the created stream (its coordinates come from the
-publisher's establish; its field types are read best-effort from the source
-cache variables, defaulting to `DOUBLE`) so it appears in the browser next to
-static publications and is `hypernova sub cell7/env`-able. This names the
+publisher's establish; its field types are read from the source cache
+variables — a type that cannot be read is refused with a teaching message
+pointing at `hypernova register`, never guessed, since a wrong type would
+misdecode the UADP) so it appears in the browser next to static publications
+and is `hypernova sub cell7/env`-able. This names the
 *data-plane stream*, not the *connection* — the connection stays server-owned.
 It is meant for multicast/commissioned flows the registry can actually listen
 to; registering a point-to-point unicast address only makes it discoverable by
@@ -211,9 +215,10 @@ contract, not more:
 - **No FX-specific access control.** The methods are callable by any client the
   server's endpoint admits, and the data plane is plain UADP. Use FX on trusted
   networks, exactly as supernova states.
-- **`--register` type inference is best-effort.** Field wire types are read from
-  the source cache variables; unreadable ones default to `DOUBLE`. It names a
-  stream for discovery; it does not deep-validate the schema.
+- **`--register` needs readable source types.** Field wire types are read from
+  the source cache variables; if one cannot be read, `--register` is refused
+  with a message pointing at `hypernova register` (it never guesses a type). It
+  names a stream for discovery; it does not deep-validate the schema.
 - **A dataset connects once per direction.** Close the live connection before
   re-wiring the same dataset elsewhere — the server enforces this and hypernova
   surfaces its refusal.
