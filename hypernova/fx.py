@@ -69,6 +69,16 @@ class FxNotCapable(FxError):
     """The endpoint answered, but it is not an FX automation component."""
 
 
+def _reraise_or_wrap(error: BaseException, context: str) -> None:
+    """Re-raise an ``FxError`` or a non-``Exception`` ``BaseException``
+    (cancellation, ``KeyboardInterrupt``, ``SystemExit``) unchanged; wrap only
+    an ordinary exception in a teaching ``FxError``. Control-flow exceptions are
+    never swallowed into an ``FxError``."""
+    if isinstance(error, FxError) or not isinstance(error, Exception):
+        raise error
+    raise FxError(f"{context}: {error}") from error
+
+
 # --------------------------------------------------------------------------- #
 # The self-description (what a server offers), all live
 # --------------------------------------------------------------------------- #
@@ -252,14 +262,13 @@ class _AsyncuaTransport(_Transport):
                           "Check the opc.tcp endpoint and that the server is up.") from None
         # If locating the component fails (e.g. a non-FX endpoint), the session
         # and asyncua's two keepalive/subscription tasks are already live — tear
-        # them down before propagating, so a failed connect() leaks nothing.
+        # them down before propagating, so a failed connect() leaks nothing. A
+        # cancellation here must propagate as cancellation, not become an FxError.
         try:
             await self._locate()
         except BaseException as error:
             await self.disconnect()
-            if isinstance(error, FxError):
-                raise
-            raise FxError(f"could not read the FX component on {self.url}: {error}") from error
+            _reraise_or_wrap(error, f"could not read the FX component on {self.url}")
 
     async def disconnect(self) -> None:
         if self._client is not None:
@@ -349,22 +358,34 @@ class _AsyncuaTransport(_Transport):
 
     async def read_endpoint(self, entity: str, name: str) -> dict | None:
         """Read just this endpoint's Status/Address/Dataset — three node reads,
-        not a full address-space browse (status polling calls this often)."""
+        not a full address-space browse (status polling calls this often). A
+        genuinely absent endpoint reads as ``None``; a transport or session
+        failure *propagates*, so status polling never misreports a dead server
+        as 'missing' (which would silently burn a wait_operational timeout) and
+        unlink never mistakes a dropped connection for 'already closed'."""
         from asyncua import ua
+        from asyncua.ua.uaerrors import UaStatusCodeError
         identifier = self._component.nodeid.Identifier
         namespace = self._component.nodeid.NamespaceIndex
         base = f"{identifier}.FunctionalEntities.{entity}.ConnectionEndpoints.{name}"
 
-        async def read(leaf):
-            try:
-                return await self._client.get_node(ua.NodeId(f"{base}.{leaf}", namespace)).read_value()
-            except Exception:  # noqa: BLE001 — a missing endpoint reads as absent
-                return None
+        def node(leaf):
+            return self._client.get_node(ua.NodeId(f"{base}.{leaf}", namespace))
 
-        status, address, dataset = await asyncio.gather(
-            read("Status"), read("Address"), read("Dataset"))
-        if status is None:
-            return None
+        try:
+            status = await node("Status").read_value()
+        except UaStatusCodeError as error:
+            if error.code in (ua.StatusCodes.BadNodeIdUnknown, ua.StatusCodes.BadNodeIdInvalid):
+                return None  # the endpoint node does not exist — genuinely absent
+            raise  # any other status (and every transport error) is a real failure
+
+        async def optional(leaf):
+            try:
+                return await node(leaf).read_value()
+            except UaStatusCodeError:
+                return None  # tolerate a missing Address/Dataset variable, not a drop
+
+        address, dataset = await asyncio.gather(optional("Address"), optional("Dataset"))
         return {"name": name, "status": int(status),
                 "address": address or "", "dataset": dataset or ""}
 
